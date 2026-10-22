@@ -1,0 +1,9 @@
+{
+  "name": "GeminiGram",
+  "description": "A high-performance, Telegram-inspired messenger featuring username-based authentication and a built-in AI assistant powered by Gemini 3 Flash.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ],
+  "majorCapabilities": []
+}
