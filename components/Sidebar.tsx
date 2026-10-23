@@ -105,6 +105,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       setIsPWA(true);
       (window as any).stargramInstallPrompt = null;
       setDeferredPrompt(null);
+      setShowDrawer(false);
     };
     const handleInstallPromptReady = () => {
       setDeferredPrompt((window as any).stargramInstallPrompt || null);
@@ -128,12 +129,12 @@ const Sidebar: React.FC<SidebarProps> = ({
   }, []);
 
   const handleInstallPWA = async () => {
-    setShowDrawer(false);
-    if (deferredPrompt) {
+    const installPrompt = deferredPrompt || (window as any).stargramInstallPrompt;
+    if (installPrompt) {
       try {
-        deferredPrompt.prompt();
-        const choice = await deferredPrompt.userChoice;
-        if (choice?.outcome === 'accepted') setIsPWA(true);
+        // Call prompt directly from the click handler so the browser's user-activation check passes.
+        installPrompt.prompt();
+        await installPrompt.userChoice;
         (window as any).stargramInstallPrompt = null;
         setDeferredPrompt(null);
       } catch {
@@ -1537,7 +1538,7 @@ const Sidebar: React.FC<SidebarProps> = ({
     
       {/* PWA Installation Guide Modal */}
       {showPwaGuideModal && (
-        <div className="fixed inset-0 z-60 bg-black/80 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
+        <div className="fixed inset-0 z-[100] bg-black/80 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
           <div className="w-full max-w-sm bg-[#17212b] rounded-3xl p-5 border border-white/10 shadow-2xl space-y-4 animate-pop text-right" dir="rtl">
             <div className="flex items-center justify-between border-b border-white/5 pb-3">
               <div className="flex items-center gap-2.5">
@@ -1558,7 +1559,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                 </p>
               )}
               <p className="text-white font-medium">
-                برای نصب پیام‌رسان استارلی روی دستگاه خود و استفاده بدون نوار مرورگر:
+                مرورگر برای این سایت هنوز پنجره نصب را ارائه نمی‌کند. پس از فعال‌شدن نصب PWA، با زدن دکمه نصب همین‌جا درخواست رسمی مرورگر باز می‌شود. در حال حاضر می‌توانید از روش‌های زیر استفاده کنید:
               </p>
               <div className="bg-[#242f3d] p-3 rounded-2xl border border-white/5 space-y-2">
                 <div className="flex items-start gap-2">
