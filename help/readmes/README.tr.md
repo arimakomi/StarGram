@@ -1,6 +1,6 @@
 # ⭐ StarGram
 
-> **Dil:** [English](README.md) · [فارسی](README.fa.md) · [العربية](README.ar.md) · [Español](README.es.md) · [Français](README.fr.md) · [Türkçe](README.tr.md) · [简体中文](README.zh-CN.md)
+> **Dil:** [English](../../README.md) · [فارسی](README.fa.md) · [العربية](README.ar.md) · [Español](README.es.md) · [Français](README.fr.md) · [Türkçe](README.tr.md) · [简体中文](README.zh-CN.md)
 
 StarGram, Farsça arayüze sahip, kendi sunucunuzda barındırabileceğiniz bir web mesajlaşma uygulamasıdır. Özel ve grup sohbetleri, kanallar, hikâyeler ve yönetim özellikleri sunar. Veriler PostgreSQL, MySQL/MariaDB veya yerel JSON dosyasında tutulabilir.
 

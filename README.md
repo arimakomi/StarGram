@@ -7,6 +7,8 @@
 
 StarGram is a self-hosted web messenger with a Persian right-to-left interface. It supports private chats, groups, channels, stories, administration, and optional Gemini assistance. Data can be stored in PostgreSQL, MySQL/MariaDB, or a local JSON file.
 
+User guides (Persian): [General help](help/README.md) · [Web messenger guides](help/وب/README.md)
+
 ## Features
 
 - Private and group chats, channels, search, replies, editing, reactions, and pinned messages

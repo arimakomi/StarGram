@@ -1,6 +1,6 @@
 # ⭐ StarGram
 
-> **Idioma:** [English](README.md) · [فارسی](README.fa.md) · [العربية](README.ar.md) · [Español](README.es.md) · [Français](README.fr.md) · [Türkçe](README.tr.md) · [简体中文](README.zh-CN.md)
+> **Idioma:** [English](../../README.md) · [فارسی](README.fa.md) · [العربية](README.ar.md) · [Español](README.es.md) · [Français](README.fr.md) · [Türkçe](README.tr.md) · [简体中文](README.zh-CN.md)
 
 StarGram es un mensajero web autoalojado con interfaz persa. Incluye chats privados y grupales, canales, historias y administración. Los datos se guardan en tu servidor mediante PostgreSQL, MySQL/MariaDB o JSON local.
 

@@ -2,11 +2,11 @@
 
 # ⭐ StarGram
 
-> **انتخاب زبان:** [English](README.md) · [فارسی](README.fa.md) · [العربية](README.ar.md) · [Español](README.es.md) · [Français](README.fr.md) · [Türkçe](README.tr.md) · [简体中文](README.zh-CN.md)
+> **انتخاب زبان:** [English](../../README.md) · [فارسی](README.fa.md) · [العربية](README.ar.md) · [Español](README.es.md) · [Français](README.fr.md) · [Türkçe](README.tr.md) · [简体中文](README.zh-CN.md)
 
 پیام‌رسان وب خودمیزبان با رابط فارسی؛ شامل گفت‌وگوی خصوصی، گروه، کانال، استوری و پنل مدیریت. داده‌ها روی سرور شما ذخیره می‌شوند و می‌توانید از PostgreSQL، MySQL/MariaDB یا فایل محلی JSON استفاده کنید.
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](../../LICENSE)
 [![Build](https://github.com/arimakomi/StarGram/actions/workflows/build.yml/badge.svg)](https://github.com/arimakomi/StarGram/actions/workflows/build.yml)
 
 ## قابلیت‌ها

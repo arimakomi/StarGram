@@ -2,11 +2,11 @@
 
 # ⭐ StarGram
 
-> **اللغة:** [English](README.md) · [فارسی](README.fa.md) · [العربية](README.ar.md) · [Español](README.es.md) · [Français](README.fr.md) · [Türkçe](README.tr.md) · [简体中文](README.zh-CN.md)
+> **اللغة:** [English](../../README.md) · [فارسی](README.fa.md) · [العربية](README.ar.md) · [Español](README.es.md) · [Français](README.fr.md) · [Türkçe](README.tr.md) · [简体中文](README.zh-CN.md)
 
 StarGram تطبيق مراسلة ويب ذاتي الاستضافة بواجهة فارسية، ويدعم المحادثات الخاصة والمجموعات والقنوات والقصص والإدارة. تُخزّن البيانات على خادمك باستخدام PostgreSQL أو MySQL/MariaDB أو ملف JSON محلي.
 
-[رخصة MIT](LICENSE) · [بناء المشروع تلقائياً](https://github.com/arimakomi/StarGram/actions/workflows/build.yml)
+[رخصة MIT](../../LICENSE) · [بناء المشروع تلقائياً](https://github.com/arimakomi/StarGram/actions/workflows/build.yml)
 
 ## الميزات
 

@@ -1,6 +1,6 @@
 # ⭐ StarGram
 
-> **语言：** [English](README.md) · [فارسی](README.fa.md) · [العربية](README.ar.md) · [Español](README.es.md) · [Français](README.fr.md) · [Türkçe](README.tr.md) · [简体中文](README.zh-CN.md)
+> **语言：** [English](../../README.md) · [فارسی](README.fa.md) · [العربية](README.ar.md) · [Español](README.es.md) · [Français](README.fr.md) · [Türkçe](README.tr.md) · [简体中文](README.zh-CN.md)
 
 StarGram 是一款可自行托管的网页即时通讯应用，界面为波斯语，支持私聊、群组、频道、动态和管理功能。数据保存在自己的服务器上，可使用 PostgreSQL、MySQL/MariaDB 或本地 JSON 文件。
 
