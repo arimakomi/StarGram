@@ -1,9 +1,15 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { User, DEFAULT_AVATAR } from '../types';
-import { X, Shield, Key, Check, Smartphone, Lock, Camera, LogOut, ChevronLeft, Eye, Clock, Monitor, User as UserIcon, ArrowRight, Copy, QrCode, RotateCcw } from 'lucide-react';
+import { 
+  X, Shield, Key, Check, Smartphone, Lock, Camera, LogOut, ChevronLeft, Eye, Clock, 
+  Monitor, User as UserIcon, ArrowRight, Copy, QrCode, RotateCcw, Palette, Upload,
+  Sparkles, Volume2, Bell, CheckCircle2, Image as ImageIcon
+} from 'lucide-react';
 
 import { compressImage } from '../services/imageUtils';
+import { WALLPAPER_PRESETS, resolveWallpaperStyle } from '../services/wallpaperPresets';
+import { playNotificationSound, requestNotificationPermission, isNotificationGranted } from '../services/notificationService';
 
 interface SettingsModalProps {
   user: User;
@@ -12,9 +18,12 @@ interface SettingsModalProps {
 }
 
 const SettingsModal: React.FC<SettingsModalProps> = ({ user, onClose, onUpdateUser }) => {
-  const [tab, setTab] = useState<'profile' | 'security'>('profile');
+  const [tab, setTab] = useState<'profile' | 'appearance' | 'security'>('profile');
   const [displayName, setDisplayName] = useState(user.displayName);
   const [bio, setBio] = useState(user.bio || '');
+  const [customWallpaperUrl, setCustomWallpaperUrl] = useState('');
+  const [notifGranted, setNotifGranted] = useState(isNotificationGranted());
+  const wallpaperFileInputRef = useRef<HTMLInputElement>(null);
   
   // Session State
   const [sessionInfo, setSessionInfo] = useState<{os: string, browser: string}>({os: 'Unknown', browser: 'Web'});
@@ -277,9 +286,9 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ user, onClose, onUpdateUs
         </div>
         
         <div className="flex border-b border-white/5 bg-[#17212b] shrink-0">
-          {['profile', 'security'].map((t: any) => (
+          {(['profile', 'appearance', 'security'] as const).map((t) => (
             <button key={t} onClick={() => setTab(t)} className={`flex-1 py-4 text-xs font-bold transition-all relative ${tab===t?'text-[#3390ec]':'text-[#708499]'}`}>
-              {t === 'profile' ? 'حساب کاربری' : 'حریم خصوصی و امنیت'}
+              {t === 'profile' ? 'حساب کاربری' : (t === 'appearance' ? 'پس‌زمینه و ظاهر' : 'امنیت')}
               {tab === t && <div className="absolute bottom-0 left-0 right-0 h-1 bg-[#3390ec] rounded-t-full"/>}
             </button>
           ))}
@@ -339,6 +348,180 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ user, onClose, onUpdateUs
                 </div>
                 <button onClick={() => save({displayName, bio})} className="w-full py-4 bg-[#3390ec] rounded-2xl font-bold flex items-center justify-center gap-2 shadow-xl hover:bg-[#2881d9] active:scale-95 transition-all text-white"><Check size={20}/> ذخیره پروفایل</button>
               </div>
+            </div>
+          )}
+
+          {tab === 'appearance' && (
+            <div className="space-y-6 animate-in slide-in-from-left pb-10">
+              {/* Wallpaper Section */}
+              <section className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-[#3390ec] font-bold text-xs uppercase tracking-widest px-1 flex items-center gap-1.5">
+                    <Palette size={15} />
+                    <span>پس‌زمینه گفتگوها (Wallpaper)</span>
+                  </h4>
+                  <span className="text-[11px] text-[#708499]">پس‌زمینه پیش‌فرض کلی</span>
+                </div>
+
+                {/* Preset Wallpaper Cards */}
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                  {WALLPAPER_PRESETS.map((p) => {
+                    const isSelected = (user.wallpaper || 'default') === p.id;
+                    return (
+                      <div
+                        key={p.id}
+                        onClick={() => save({ wallpaper: p.id })}
+                        className={`group relative rounded-2xl p-2.5 h-28 border cursor-pointer transition-all flex flex-col justify-between overflow-hidden shadow-sm hover:scale-[1.02] ${
+                          isSelected ? 'border-[#3390ec] ring-2 ring-[#3390ec]/30' : 'border-white/10 hover:border-white/20'
+                        }`}
+                        style={p.style}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-bold text-white/90 bg-black/50 px-2 py-0.5 rounded-full backdrop-blur-xs">
+                            {p.name}
+                          </span>
+                          {isSelected && (
+                            <span className="w-5 h-5 rounded-full bg-[#3390ec] text-white flex items-center justify-center shadow-md">
+                              <Check size={12} className="stroke-[3]" />
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Dummy chat preview bubbles */}
+                        <div className="space-y-1 opacity-70 group-hover:opacity-100 transition-opacity">
+                          <div className="w-16 h-2 bg-white/20 rounded-full" />
+                          <div className="w-10 h-2 bg-[#3390ec]/60 rounded-full mr-auto" />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Custom Wallpaper Upload / URL */}
+                <div className="bg-[#242f3d] p-4 rounded-2xl border border-white/5 space-y-3">
+                  <h5 className="text-xs font-bold text-white flex items-center gap-2">
+                    <ImageIcon size={16} className="text-[#3390ec]" />
+                    <span>تصویر دلخواه شخصی</span>
+                  </h5>
+
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <input
+                      ref={wallpaperFileInputRef}
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          try {
+                            const compressed = await compressImage(file, 1280, 1280, 0.82);
+                            save({ wallpaper: compressed });
+                          } catch (err) {
+                            console.error('Wallpaper compression error:', err);
+                          }
+                        }
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => wallpaperFileInputRef.current?.click()}
+                      className="flex-1 py-2.5 bg-[#3390ec]/15 hover:bg-[#3390ec]/25 border border-[#3390ec]/40 rounded-xl text-xs font-bold text-[#3390ec] flex items-center justify-center gap-1.5 transition-all"
+                    >
+                      <Upload size={14} />
+                      <span>بارگذاری عکس از دستگاه</span>
+                    </button>
+                    {user.wallpaper && user.wallpaper !== 'default' && (
+                      <button
+                        type="button"
+                        onClick={() => save({ wallpaper: 'default' })}
+                        className="py-2.5 px-3 bg-white/5 hover:bg-white/10 rounded-xl text-xs text-[#708499] hover:text-white transition-all"
+                        title="بازنشانی به الگوی پیش‌فرض"
+                      >
+                        <RotateCcw size={14} />
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-2 pt-1">
+                    <input
+                      value={customWallpaperUrl}
+                      onChange={(e) => setCustomWallpaperUrl(e.target.value)}
+                      placeholder="یا آدرس اینترنتی تصویر (https://...)"
+                      dir="ltr"
+                      className="flex-1 bg-[#17212b] p-2.5 rounded-xl text-xs text-white outline-none border border-white/5 focus:border-[#3390ec] transition-colors"
+                    />
+                    <button
+                      type="button"
+                      disabled={!customWallpaperUrl.trim()}
+                      onClick={() => {
+                        if (customWallpaperUrl.trim()) {
+                          save({ wallpaper: customWallpaperUrl.trim() });
+                          setCustomWallpaperUrl('');
+                        }
+                      }}
+                      className="py-2.5 px-4 bg-[#3390ec] hover:bg-[#2881d9] disabled:opacity-40 rounded-xl text-xs font-bold text-white transition-all"
+                    >
+                      ثبت
+                    </button>
+                  </div>
+                </div>
+              </section>
+
+              {/* Sound & Notifications Section */}
+              <section className="space-y-3">
+                <h4 className="text-[#3390ec] font-bold text-xs uppercase tracking-widest px-1 flex items-center gap-1.5">
+                  <Bell size={15} />
+                  <span>سیستم اعلان‌ها و صدای چت</span>
+                </h4>
+
+                <div className="bg-[#242f3d] p-4 rounded-2xl border border-white/5 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-0.5">
+                      <h5 className="text-xs font-bold text-white flex items-center gap-2">
+                        <Volume2 size={16} className="text-emerald-400" />
+                        <span>صدای پیام‌های دریافتی</span>
+                      </h5>
+                      <p className="text-[11px] text-[#708499]">صدای سنتزشده دو صدایی تلگرام (بدون نیاز به دانلود فایل)</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => playNotificationSound()}
+                      className="px-3 py-1.5 bg-[#3390ec]/20 text-[#3390ec] hover:bg-[#3390ec]/30 rounded-xl text-xs font-bold flex items-center gap-1 transition-all active:scale-95"
+                    >
+                      <Volume2 size={13} />
+                      <span>پخش تست</span>
+                    </button>
+                  </div>
+
+                  <div className="h-px bg-white/5" />
+
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-0.5">
+                      <h5 className="text-xs font-bold text-white">اعلان مرورگر و موبایل (Push)</h5>
+                      <p className="text-[11px] text-[#708499]">
+                        {notifGranted ? 'دسترسی داده شده است' : 'برای دریافت اعلان هنگام خروج از تب فعال کنید'}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const res = await requestNotificationPermission();
+                        setNotifGranted(res === 'granted');
+                        if (res === 'granted') {
+                          playNotificationSound();
+                        }
+                      }}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                        notifGranted
+                          ? 'bg-green-500/20 text-green-400'
+                          : 'bg-[#3390ec] text-white hover:bg-[#2881d9]'
+                      }`}
+                    >
+                      {notifGranted ? 'فعال شد' : 'درخواست دسترسی'}
+                    </button>
+                  </div>
+                </div>
+              </section>
             </div>
           )}
 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { User, Message, Chat, FolderType, DEFAULT_AVATAR, Story, SystemConfig, MessageReport } from './types';
 import Login from './components/Login';
 import Sidebar from './components/Sidebar';
@@ -11,9 +11,10 @@ import { ReportModal } from './components/ReportModal';
 import { AdminPanelModal } from './components/AdminPanelModal';
 import { generateLocalAvatarSvg } from './services/avatarGenerator';
 import { gemini } from './services/geminiService';
-import { Lock } from 'lucide-react';
+import { Lock, Send, Bell, Sparkles } from 'lucide-react';
 import { db, collection, query, where, onSnapshot, doc, updateDoc, setDoc, getDoc, getDocs, deleteDoc, arrayUnion, startSync, stopSync } from './services/database';
 import { authApi, getToken } from './services/auth';
+import { playNotificationSound, sendDesktopNotification, updateTabTitle } from './services/notificationService';
 
 const AI_BOT: User = {
   id: 'ai-assistant',
@@ -53,9 +54,12 @@ const App: React.FC = () => {
   const [reportingMessage, setReportingMessage] = useState<Message | null>(null);
   const [showAdminPanel, setShowAdminPanel] = useState(false);
   
-  // App Lock State
+  // App Lock & Entrance Splash State
   const [isAppLocked, setIsAppLocked] = useState(false);
   const [lockInput, setLockInput] = useState('');
+  const [showEntranceSplash, setShowEntranceSplash] = useState(false);
+  const [inAppToast, setInAppToast] = useState<{ title: string; body: string; chatId: string } | null>(null);
+  const lastKnownMsgTimeRef = useRef<number>(Date.now());
 
   // 1. Load User Session (اعتبارسنجی توکن روی سرور و دریافت داده‌ها از دیتابیس)
   const [booting, setBooting] = useState(true);
@@ -74,6 +78,8 @@ const App: React.FC = () => {
             setCurrentUser(user);
             document.body.className = `${user.theme || 'night'}-theme`;
             if (user.passcode) setIsAppLocked(true);
+            setShowEntranceSplash(true);
+            setTimeout(() => setShowEntranceSplash(false), 1300);
           } else if (r.status === 401 || r.status === 403) {
             localStorage.removeItem('starly_session_cloud');
             await authApi.logout();
@@ -83,6 +89,27 @@ const App: React.FC = () => {
       finally { setBooting(false); }
     })();
   }, []);
+
+  // Real-time presence heartbeat (updates lastSeen every 25s)
+  useEffect(() => {
+    if (!currentUser) return;
+    authApi.heartbeat().catch(() => {});
+    const interval = setInterval(() => {
+      authApi.heartbeat().catch(() => {});
+    }, 25000);
+
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') {
+        authApi.heartbeat().catch(() => {});
+      }
+    };
+    document.addEventListener('visibilitychange', onVisible);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [currentUser]);
 
   // 2. Real-time Chats Sync
   useEffect(() => {
@@ -103,6 +130,51 @@ const App: React.FC = () => {
 
     return () => unsubscribe();
   }, [currentUser]);
+
+  // Incoming Message Notifications & Audio Chime
+  useEffect(() => {
+    if (!currentUser || chats.length === 0) return;
+    const incomingList: { msg: Message; chat: Chat }[] = [];
+
+    chats.forEach(c => {
+      if (!c.lastMessage) return;
+      const lm = c.lastMessage;
+      if (lm.senderId !== currentUser.id && lm.timestamp > lastKnownMsgTimeRef.current) {
+        incomingList.push({ msg: lm, chat: c });
+      }
+    });
+
+    if (incomingList.length > 0) {
+      incomingList.sort((a, b) => b.msg.timestamp - a.msg.timestamp);
+      const newestIncoming = incomingList[0];
+      lastKnownMsgTimeRef.current = newestIncoming.msg.timestamp;
+      const isMuted = newestIncoming.chat.isMuted;
+      if (!isMuted) {
+        playNotificationSound();
+        const chatTitle = newestIncoming.chat.type === 'private'
+          ? (newestIncoming.chat.participants.find((p: User) => p.id === newestIncoming.msg.senderId)?.displayName || 'پیام جدید')
+          : (newestIncoming.chat.groupName || 'گروه');
+        
+        sendDesktopNotification(chatTitle, {
+          body: newestIncoming.msg.text || (newestIncoming.msg.imageUrl ? 'تصویر' : 'رسانه جدید'),
+          onClick: () => setActiveChatId(newestIncoming.chat.id)
+        });
+
+        if (activeChatId !== newestIncoming.chat.id) {
+          setInAppToast({
+            title: chatTitle,
+            body: newestIncoming.msg.text || (newestIncoming.msg.imageUrl ? 'تصویر' : 'رسانه جدید'),
+            chatId: newestIncoming.chat.id
+          });
+          setTimeout(() => setInAppToast(null), 4000);
+        }
+      }
+    }
+
+    // Unread tab badge
+    const totalUnread = chats.reduce((acc, c) => acc + (c.unreadCount || 0), 0);
+    updateTabTitle(totalUnread);
+  }, [chats, currentUser, activeChatId]);
 
   // Auto-clear unreadCount when activeChatId is viewed
   useEffect(() => {
@@ -141,9 +213,13 @@ const App: React.FC = () => {
   }, []);
 
   const handleAuth = async (user: User) => {
+    setShowEntranceSplash(true);
     await startSync();
     setCurrentUser(user);
     document.body.className = `${user.theme}-theme`;
+    setTimeout(() => {
+      setShowEntranceSplash(false);
+    }, 1500);
   };
 
   const handleUnlock = (code: string) => {
@@ -209,6 +285,8 @@ const App: React.FC = () => {
     try {
       switch(action) {
         case 'send': {
+          const activeChat = chats.find(c => c.id === activeChatId);
+          const isChannel = activeChat?.type === 'channel';
           const msg: Message = {
             id: `m_${Date.now()}_${Math.random().toString(36).substr(2,9)}`,
             senderId: currentUser.id,
@@ -219,7 +297,10 @@ const App: React.FC = () => {
             poll: payload.poll,
             forwardedFrom: payload.forwardedFrom,
             timestamp: Date.now(),
-            isRead: false
+            isRead: false,
+            seenBy: [{ userId: currentUser.id, seenAt: Date.now() }],
+            viewsCount: isChannel ? 1 : undefined,
+            viewers: isChannel ? [currentUser.id] : undefined
           };
           
           await updateDoc(chatRef, {
@@ -227,6 +308,46 @@ const App: React.FC = () => {
             lastMessage: msg,
             unreadCount: 0
           });
+          break;
+        }
+
+        case 'updateChatWallpaper':
+          await updateDoc(chatRef, { wallpaper: payload.wallpaper || '' });
+          break;
+
+        case 'markSeen': {
+          const chatDoc = await getDoc(chatRef);
+          if (chatDoc.exists()) {
+            const chatData = chatDoc.data() as Chat;
+            const ids: string[] = payload.messageIds || [];
+            if (ids.length === 0) break;
+            const now = Date.now();
+            let changed = false;
+            const newMessages = (chatData.messages || []).map(m => {
+              if (ids.includes(m.id)) {
+                changed = true;
+                const curSeen = m.seenBy || [];
+                const already = curSeen.some(s => s.userId === currentUser.id);
+                const updatedSeen = already ? curSeen : [...curSeen, { userId: currentUser.id, seenAt: now }];
+
+                const viewers = m.viewers || [];
+                const updatedViewers = viewers.includes(currentUser.id) ? viewers : [...viewers, currentUser.id];
+                const viewsCount = Math.max(m.viewsCount || 1, updatedViewers.length);
+
+                return {
+                  ...m,
+                  isRead: true,
+                  seenBy: updatedSeen,
+                  viewers: updatedViewers,
+                  viewsCount
+                };
+              }
+              return m;
+            });
+            if (changed) {
+              await updateDoc(chatRef, { messages: newMessages, unreadCount: 0 });
+            }
+          }
           break;
         }
 
@@ -797,6 +918,56 @@ const App: React.FC = () => {
             // Re-sync
           }}
         />
+      )}
+      {/* In-App Message Toast Notification */}
+      {inAppToast && (
+        <div 
+          onClick={() => {
+            setActiveChatId(inAppToast.chatId);
+            setInAppToast(null);
+          }}
+          className="fixed top-4 left-4 right-4 md:right-auto md:left-6 md:w-80 z-50 bg-[#17212b]/95 backdrop-blur-xl border border-[#3390ec]/30 shadow-2xl rounded-2xl p-3 flex items-center gap-3 cursor-pointer animate-in slide-in-from-top hover:bg-[#242f3d] transition-all"
+        >
+          <div className="w-10 h-10 rounded-full bg-[#3390ec]/20 text-[#3390ec] flex items-center justify-center shrink-0">
+            <Bell size={18} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-bold text-white truncate">{inAppToast.title}</p>
+            <p className="text-[11px] text-[#708499] truncate">{inAppToast.body}</p>
+          </div>
+        </div>
+      )}
+
+      {/* Smooth Logo Reveal Splash Animation */}
+      {showEntranceSplash && (
+        <div 
+          className="fixed inset-0 z-[999] bg-[#0e1621] flex flex-col items-center justify-center animate-in fade-in duration-300"
+          onClick={() => setShowEntranceSplash(false)}
+        >
+          <div className="relative flex items-center justify-center mb-6">
+            {/* Shimmering Pulsing Glow Rings */}
+            <div className="absolute w-36 h-36 rounded-full bg-[#3390ec]/20 animate-ping opacity-60" />
+            <div className="absolute w-44 h-44 rounded-full bg-[#3390ec]/10 animate-pulse" />
+            
+            {/* Logo Badge */}
+            <div className="relative w-24 h-24 bg-gradient-to-tr from-[#2b5278] via-[#3390ec] to-[#5288c1] rounded-[32px] flex items-center justify-center shadow-2xl shadow-[#3390ec]/40 transform animate-pop">
+              <Send size={46} className="text-white -translate-x-1" />
+            </div>
+          </div>
+
+          <div className="text-center space-y-2 animate-in slide-in-from-bottom duration-500">
+            <h1 className="text-2xl font-bold text-white tracking-wide flex items-center justify-center gap-2">
+              <span>خوش آمدید به استارلی چت</span>
+              <Sparkles size={20} className="text-amber-400" />
+            </h1>
+            <p className="text-xs text-[#708499]">پیام‌رسان ابری، امن و پرسرعت</p>
+            {currentUser && (
+              <p className="text-xs text-[#3390ec] font-bold mt-1">
+                ورود به عنوان {currentUser.displayName}
+              </p>
+            )}
+          </div>
+        </div>
       )}
     </div>
   );

@@ -38,5 +38,6 @@ export const authApi = {
     return r;
   },
   me: () => call('/api/auth/me'),
+  heartbeat: () => call('/api/users/heartbeat', { method: 'POST' }),
   logout: async () => { await call('/api/auth/logout', { method: 'POST' }); setToken(null); }
 };

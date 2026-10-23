@@ -10,6 +10,7 @@ import {
 import { collection, query, where, getDocs, db } from '../services/database';
 import { compressImage } from '../services/imageUtils';
 import { StoriesBar } from './StoriesBar';
+import { getUserPresence } from '../services/presenceUtils';
 
 interface SidebarProps {
   chats: Chat[];
@@ -523,7 +524,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                 className="w-12 h-12 rounded-full bg-[#242f3d] object-cover border border-white/5"
                               />
                             )}
-                            {chat.type === 'private' && other?.status === 'online' && (
+                            {chat.type === 'private' && other && getUserPresence(other, (currentUser.contacts || []).includes(other.id)).isOnline && (
                               <div className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-green-500 border-2 border-[#17212b] rounded-full"/>
                             )}
                           </div>
@@ -618,7 +619,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                         className="w-12 h-12 rounded-full bg-[#242f3d] object-cover border border-white/5"
                       />
                     )}
-                    {chat.type === 'private' && other?.status === 'online' && (
+                    {chat.type === 'private' && other && getUserPresence(other, (currentUser.contacts || []).includes(other.id)).isOnline && (
                       <div className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-green-500 border-2 border-[#17212b] rounded-full"/>
                     )}
                   </div>

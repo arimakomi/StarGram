@@ -2,7 +2,8 @@ import React, { useState, useRef } from 'react';
 import { User } from '../types';
 import { 
   X, Camera, User as UserIcon, Phone, AtSign, Info, 
-  Check, Shield, Sparkles, RefreshCw, Image as ImageIcon, FileText, Mic
+  Check, Shield, Sparkles, RefreshCw, Image as ImageIcon, FileText, Mic,
+  Calendar, Send, Instagram
 } from 'lucide-react';
 import { compressImage } from '../services/imageUtils';
 import { generateLocalAvatarSvg } from '../services/avatarGenerator';
@@ -17,6 +18,9 @@ export const MyProfileModal: React.FC<MyProfileModalProps> = ({ user, onClose, o
   const [displayName, setDisplayName] = useState(user.displayName || '');
   const [bio, setBio] = useState(user.bio || '');
   const [phone, setPhone] = useState(user.phone || '');
+  const [birthday, setBirthday] = useState(user.birthday || '');
+  const [telegramId, setTelegramId] = useState(user.telegramId || '');
+  const [instagramId, setInstagramId] = useState(user.instagramId || '');
   const [avatar, setAvatar] = useState(user.avatar || '');
   const [activeTab, setActiveTab] = useState<'media' | 'files' | 'voice'>('media');
   const [isSaving, setIsSaving] = useState(false);
@@ -51,6 +55,9 @@ export const MyProfileModal: React.FC<MyProfileModalProps> = ({ user, onClose, o
         displayName: displayName.trim(),
         bio: bio.trim(),
         phone: phone.trim(),
+        birthday: birthday.trim(),
+        telegramId: telegramId.trim().replace(/^@/, ''),
+        instagramId: instagramId.trim().replace(/^@/, ''),
         avatar: avatar
       });
       setSaveSuccess(true);
@@ -202,9 +209,57 @@ export const MyProfileModal: React.FC<MyProfileModalProps> = ({ user, onClose, o
                 />
               </div>
               <div className="flex justify-between text-[11px] text-gray-500 mt-0.5">
-                <span>نمایش به سایر کاربران</span>
+                <span>نمایش به سایر کاربران (اختیاری)</span>
                 <span>{bio.length} / 120</span>
               </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+              <div>
+                <label className="block text-xs font-medium text-gray-400 mb-1.5">شناسه تلگرام</label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={telegramId}
+                    onChange={(e) => setTelegramId(e.target.value)}
+                    placeholder="username"
+                    dir="ltr"
+                    className="w-full bg-[#242f3d] border border-[#2b5278]/40 rounded-xl px-4 py-2.5 text-white text-sm focus:outline-hidden focus:border-[#5288c1] transition-colors pl-9 text-left font-mono"
+                  />
+                  <Send className="w-4 h-4 text-[#3390ec] absolute left-3 top-3 -rotate-45" />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-gray-400 mb-1.5">شناسه اینستاگرام</label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={instagramId}
+                    onChange={(e) => setInstagramId(e.target.value)}
+                    placeholder="username"
+                    dir="ltr"
+                    className="w-full bg-[#242f3d] border border-[#2b5278]/40 rounded-xl px-4 py-2.5 text-white text-sm focus:outline-hidden focus:border-[#5288c1] transition-colors pl-9 text-left font-mono"
+                  />
+                  <Instagram className="w-4 h-4 text-pink-400 absolute left-3 top-3" />
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-gray-400 mb-1.5">تاریخ تولد</label>
+              <div className="relative">
+                <input
+                  type="text"
+                  value={birthday}
+                  onChange={(e) => setBirthday(e.target.value)}
+                  placeholder="مثال: ۱۳۸۰/۰۶/۱۵ یا 2001-09-06"
+                  dir="ltr"
+                  className="w-full bg-[#242f3d] border border-[#2b5278]/40 rounded-xl px-4 py-2.5 text-white text-sm focus:outline-hidden focus:border-[#5288c1] transition-colors pl-9 text-right"
+                />
+                <Calendar className="w-4 h-4 text-amber-400 absolute left-3 top-3" />
+              </div>
+              <p className="text-[11px] text-gray-500 mt-1">تنها در صورت پر شدن در پروفایل شما برای دیگران نمایش داده می‌شود.</p>
             </div>
           </div>
 

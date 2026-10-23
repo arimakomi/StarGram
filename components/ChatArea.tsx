@@ -6,10 +6,13 @@ import {
   Pin, Reply, BarChart2, Volume2, Square, Plus, CheckCheck, MoreVertical,
   Link as LinkIcon, Edit3, Shield, Copy, Users, Bookmark, RotateCcw, Clock, Lock, 
   ArrowRight, Search, Play, Pause, Download, Share2, Globe, Heart, ThumbsUp, Flame, Check,
-  ZoomIn, ZoomOut, Phone, Bell, BellOff, Trash2, AtSign, FileText, CheckCircle2, Flag
+  ZoomIn, ZoomOut, Phone, Bell, BellOff, Trash2, AtSign, FileText, CheckCircle2, Flag,
+  Eye, Calendar, Instagram, Palette, CheckCircle
 } from 'lucide-react';
 import { compressImage } from '../services/imageUtils';
 import { encryptMessage } from '../services/cryptoUtils';
+import { getUserPresence, formatSeenTime } from '../services/presenceUtils';
+import { resolveWallpaperStyle, WALLPAPER_PRESETS } from '../services/wallpaperPresets';
 
 interface ChatAreaProps {
   chat: Chat | null;
@@ -82,6 +85,26 @@ const ChatArea: React.FC<ChatAreaProps> = ({
 
   // Private chat media tabs: 'photos' | 'voice' | 'links'
   const [privateMediaTab, setPrivateMediaTab] = useState<'photos' | 'voice' | 'links'>('photos');
+
+  // Per-chat wallpaper modal & Group seen submenu state
+  const [showWallpaperModal, setShowWallpaperModal] = useState(false);
+  const [showSeenSubmenu, setShowSeenSubmenu] = useState(false);
+  const [customChatWallpaperUrl, setCustomChatWallpaperUrl] = useState('');
+  const chatWallpaperFileRef = useRef<HTMLInputElement>(null);
+
+  // Auto-mark unseen messages as seen by currentUser
+  useEffect(() => {
+    if (!chat || !currentUser || chat.type === 'saved') return;
+    const unseenIds: string[] = [];
+    (chat.messages || []).forEach(m => {
+      if (m.senderId === currentUser.id) return;
+      const seen = m.seenBy?.some(s => s.userId === currentUser.id);
+      if (!seen) unseenIds.push(m.id);
+    });
+    if (unseenIds.length > 0) {
+      onAction('markSeen', { messageIds: unseenIds });
+    }
+  }, [chat?.id, chat?.messages?.length, currentUser?.id]);
 
   const handleZoomIn = () => {
     setZoomScale(prev => Math.min(Number((prev + 0.35).toFixed(2)), 4));
@@ -251,23 +274,29 @@ const ChatArea: React.FC<ChatAreaProps> = ({
         title: 'پیام‌های ذخیره شده',
         avatar: null,
         status: 'فضای شخصی شما',
-        isSaved: true
+        isSaved: true,
+        isOnline: false
       };
     }
     const otherParticipant = chat.participants.find(p => p.id !== currentUser.id);
+    const isContact = Boolean(otherParticipant && (currentUser.contacts || []).includes(otherParticipant.id));
     if (chat.type === 'private') {
+      const presence = otherParticipant ? getUserPresence(otherParticipant, isContact) : { isOnline: false, label: '' };
       return {
         title: otherParticipant?.displayName || 'کاربر استارلی',
         avatar: otherParticipant?.avatar,
-        status: isTyping ? 'درحال نوشتن...' : (otherParticipant?.status === 'online' ? 'آنلاین' : 'آخرین بازدید به تازگی'),
-        isSaved: false
+        status: isTyping ? 'درحال نوشتن...' : presence.label,
+        isSaved: false,
+        isOnline: presence.isOnline
       };
     }
+    const onlineCount = chat.participants.filter(p => getUserPresence(p).isOnline).length;
     return {
-      title: chat.groupName || 'گروه استارلی',
+      title: chat.groupName || (chat.type === 'channel' ? 'کانال استارلی' : 'گروه استارلی'),
       avatar: chat.groupAvatar,
-      status: isTyping ? 'درحال نوشتن...' : `${chat.participants.length} عضو`,
-      isSaved: false
+      status: isTyping ? 'درحال نوشتن...' : (chat.type === 'channel' ? `${chat.participants.length} مشترک` : `${chat.participants.length} عضو${onlineCount > 0 ? `، ${onlineCount} آنلاین` : ''}`),
+      isSaved: false,
+      isOnline: false
     };
   }, [chat, currentUser, isTyping]);
 
@@ -490,7 +519,10 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   };
 
   return (
-    <div className="flex-1 flex flex-col h-screen bg-[#0e1621] relative overflow-hidden chat-wallpaper font-['Vazirmatn']">
+    <div 
+      className="flex-1 flex flex-col h-screen bg-[#0e1621] relative overflow-hidden chat-wallpaper font-['Vazirmatn']"
+      style={resolveWallpaperStyle(chat.wallpaper || currentUser.wallpaper)}
+    >
       <audio ref={audioPlayerRef} className="hidden" />
 
       {/* Header */}
@@ -518,7 +550,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                   className="w-10 h-10 rounded-full object-cover border border-white/10 group-hover:scale-105 transition-transform" 
                 />
               )}
-              {chat.type === 'private' && chat.participants.find(p=>p.id!==currentUser.id)?.status === 'online' && (
+              {chat.type === 'private' && chatInfo.isOnline && (
                 <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-[#17212b]" />
               )}
             </div>
@@ -535,7 +567,9 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                 )}
               </div>
               <div className="flex items-center gap-2">
-                <p className="text-[11px] text-[#3390ec] font-medium truncate">{chatInfo.status}</p>
+                <p className={`text-[11px] font-medium truncate ${chatInfo.isOnline ? 'text-green-400 font-bold' : 'text-[#3390ec]'}`}>
+                  {chatInfo.status}
+                </p>
                 <span className="text-[10px] text-emerald-400 font-mono flex items-center gap-0.5" title="امنیت سرتاسری E2EE فعال">
                   <span>·</span>
                   <span>E2EE AES-256</span>
@@ -547,6 +581,13 @@ const ChatArea: React.FC<ChatAreaProps> = ({
 
         {/* Header Right Actions */}
         <div className="flex items-center gap-1 shrink-0">
+          <button 
+            onClick={() => setShowWallpaperModal(true)} 
+            className="min-h-[40px] min-w-[40px] flex items-center justify-center text-[#708499] hover:text-white hover:bg-white/5 rounded-full transition-colors"
+            title="پس‌زمینه این گفتگو"
+          >
+            <Palette size={19}/>
+          </button>
           <button 
             onClick={() => setShowSearch(!showSearch)} 
             className={`min-h-[40px] min-w-[40px] flex items-center justify-center rounded-full transition-colors ${showSearch ? 'text-[#3390ec] bg-white/10' : 'text-[#708499] hover:text-white hover:bg-white/5'}`}
@@ -830,8 +871,16 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                       </div>
                     )}
 
-                    {/* Metadata (Time & Delivery Ticks) */}
-                    <div className="flex items-center justify-end gap-1 mt-1 opacity-60 select-none">
+                    {/* Metadata (Time & Delivery Ticks / Channel Views) */}
+                    <div className="flex items-center justify-end gap-1.5 mt-1 opacity-70 select-none text-[10px]">
+                      {/* Channel Views Count */}
+                      {isChannel && (
+                        <span className="flex items-center gap-1 text-[10px] text-[#708499] font-mono mr-1" title="تعداد مشاهده">
+                          <Eye size={12} className="text-[#708499]" />
+                          <span className="tabular-nums">{msg.viewsCount || 1}</span>
+                        </span>
+                      )}
+
                       {msg.isEncrypted && (
                         <span title="رمزگذاری شده با کلید AES-256" className="text-emerald-400">
                           <Lock size={10} />
@@ -841,7 +890,20 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                       <span className="text-[9px] tabular-nums">
                         {new Date(msg.timestamp).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' })}
                       </span>
-                      {isMe && <CheckCheck size={12} className="text-[#3390ec]" />}
+                      {isMe && !isChannel && (
+                        (() => {
+                          const isSeenByOthers = (msg.seenBy && msg.seenBy.some(s => s.userId !== currentUser.id)) || msg.isRead;
+                          return isSeenByOthers ? (
+                            <span title="دیده‌شده" className="inline-flex items-center text-[#3390ec]">
+                              <CheckCheck size={13} />
+                            </span>
+                          ) : (
+                            <span title="ارسال شده" className="inline-flex items-center text-white/60">
+                              <Check size={13} />
+                            </span>
+                          );
+                        })()
+                      )}
                     </div>
                   </div>
                 </div>
@@ -888,6 +950,78 @@ const ChatArea: React.FC<ChatAreaProps> = ({
               <Reply size={15} className="text-[#3390ec] scale-x-[-1]" />
               <span>پاسخ (Reply)</span>
             </button>
+
+            {/* Group Seen-By Submenu (ONLY in groups AND ONLY for messages sent by currentUser) */}
+            {chat.type === 'group' && contextMenu.message.senderId === currentUser.id && (() => {
+              const viewers = (contextMenu.message.seenBy || []).filter(s => s.userId !== currentUser.id);
+              return (
+                <div 
+                  className="relative group/seen"
+                  onMouseEnter={() => setShowSeenSubmenu(true)}
+                  onMouseLeave={() => setShowSeenSubmenu(false)}
+                >
+                  <button 
+                    type="button"
+                    onClick={() => setShowSeenSubmenu(prev => !prev)}
+                    className="w-full flex items-center justify-between p-2.5 hover:bg-white/5 rounded-xl text-white transition-colors"
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <CheckCheck size={15} className="text-[#3390ec]" />
+                      <span>دیده‌شده توسط {viewers.length} نفر</span>
+                    </div>
+                    <ChevronLeft size={14} className="text-[#708499] group-hover/seen:-translate-x-0.5 transition-transform" />
+                  </button>
+
+                  {/* Floating Submenu Popup on hover or tap */}
+                  {showSeenSubmenu && (
+                    <div 
+                      className="absolute top-0 right-full mr-2 w-64 bg-[#17212b] border border-white/10 rounded-2xl shadow-2xl p-2.5 z-50 animate-in fade-in zoom-in-95 max-h-64 overflow-y-auto custom-scrollbar"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <div className="px-2 py-1 border-b border-white/5 text-[11px] font-bold text-[#3390ec] flex items-center justify-between mb-1.5">
+                        <span className="flex items-center gap-1.5">
+                          <Eye size={13} />
+                          <span>دیده‌شده توسط ({viewers.length})</span>
+                        </span>
+                      </div>
+                      
+                      {viewers.length === 0 ? (
+                        <div className="py-4 px-2 text-center text-[#708499] text-xs leading-relaxed">
+                          هنوز عضوی این پیام را مشاهده نکرده است
+                        </div>
+                      ) : (
+                        <div className="space-y-1">
+                          {viewers.map((item) => {
+                            const member = chat.participants.find(p => p.id === item.userId) || {
+                              id: item.userId,
+                              username: item.userId,
+                              displayName: 'عضو گروه',
+                              avatar: DEFAULT_AVATAR
+                            };
+                            return (
+                              <div key={item.userId} className="flex items-center gap-2 p-1.5 rounded-xl hover:bg-white/5 transition-colors">
+                                <img 
+                                  src={member.avatar || DEFAULT_AVATAR} 
+                                  onError={(e) => { e.currentTarget.src = DEFAULT_AVATAR; }}
+                                  className="w-7 h-7 rounded-full object-cover border border-white/10 shrink-0" 
+                                />
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-xs font-bold text-white truncate">{member.displayName}</p>
+                                  <p className="text-[10px] text-[#708499] truncate font-mono" dir="ltr">@{member.username}</p>
+                                </div>
+                                <span className="text-[10px] text-[#3390ec] tabular-nums whitespace-nowrap">
+                                  {formatSeenTime(item.seenAt)}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
 
             <button 
               onClick={() => { 
@@ -1320,6 +1454,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
             (() => {
               const otherUser = chat.participants.find(p => p.id !== currentUser.id) || chat.participants[0];
               const isContact = (currentUser.contacts || []).includes(otherUser.id);
+              const otherPresence = getUserPresence(otherUser, isContact);
               const chatPhotos = chat.messages.filter(m => !!m.imageUrl);
               const chatVoiceNotes = chat.messages.filter(m => !!m.audioUrl);
               const chatLinks = chat.messages.filter(m => m.text && (m.text.includes('http') || m.text.includes('@')));
@@ -1343,7 +1478,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                         onError={(e) => { e.currentTarget.src = DEFAULT_AVATAR; }}
                         className="w-24 h-24 rounded-full mx-auto object-cover shadow-2xl border-2 border-[#3390ec]/40 group-hover/avatar:scale-105 transition-all" 
                       />
-                      {otherUser.status === 'online' && (
+                      {otherPresence.isOnline && (
                         <div className="absolute bottom-1 right-1 w-4 h-4 bg-green-500 rounded-full border-2 border-[#17212b]" />
                       )}
                       <div className="absolute inset-0 bg-black/30 rounded-full opacity-0 group-hover/avatar:opacity-100 transition-opacity flex items-center justify-center text-white text-[11px] font-bold">
@@ -1351,8 +1486,8 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                       </div>
                     </div>
                     <h4 className="font-bold text-white text-lg">{otherUser.displayName}</h4>
-                    <p className={`text-xs mt-0.5 font-medium ${otherUser.status === 'online' ? 'text-[#3390ec]' : 'text-[#708499]'}`}>
-                      {otherUser.status === 'online' ? 'آنلاین' : 'آخرین بازدید به تازگی'}
+                    <p className={`text-xs mt-0.5 font-medium ${otherPresence.isOnline ? 'text-green-400 font-bold' : 'text-[#708499]'}`}>
+                      {otherPresence.label}
                     </p>
                   </div>
 
@@ -1387,18 +1522,20 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                     </button>
                   </div>
 
-                  {/* Profile Details List */}
+                  {/* Profile Details List (Empty fields are strictly omitted) */}
                   <div className="space-y-2.5 text-xs">
-                    {/* Bio / About */}
-                    <div className="p-3.5 bg-[#242f3d] rounded-2xl border border-white/5 space-y-1">
-                      <div className="flex items-center gap-2 text-[#708499] text-[11px] font-bold">
-                        <Info size={14} className="text-[#3390ec]"/>
-                        <span>بیوگرافی</span>
+                    {/* Bio / About - Only rendered if entered */}
+                    {Boolean(otherUser.bio && otherUser.bio.trim()) && (
+                      <div className="p-3.5 bg-[#242f3d] rounded-2xl border border-white/5 space-y-1">
+                        <div className="flex items-center gap-2 text-[#708499] text-[11px] font-bold">
+                          <Info size={14} className="text-[#3390ec]"/>
+                          <span>بیوگرافی</span>
+                        </div>
+                        <p className="text-white/95 leading-relaxed text-xs">
+                          {otherUser.bio}
+                        </p>
                       </div>
-                      <p className="text-white/95 leading-relaxed text-xs">
-                        {otherUser.bio || 'توسعه‌دهنده وب و علاقه‌مند به تکنولوژی'}
-                      </p>
-                    </div>
+                    )}
 
                     {/* Username with Copy */}
                     <div className="p-3.5 bg-[#242f3d] rounded-2xl border border-white/5 flex items-center justify-between">
@@ -1437,6 +1574,81 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                         </button>
                       </div>
                     )}
+
+                    {/* Birthday - Only rendered if user entered a birthday */}
+                    {Boolean(otherUser.birthday && otherUser.birthday.trim()) && (
+                      <div className="p-3.5 bg-[#242f3d] rounded-2xl border border-white/5 space-y-1">
+                        <div className="flex items-center gap-2 text-[#708499] text-[11px] font-bold">
+                          <Calendar size={14} className="text-amber-400"/>
+                          <span>تاریخ تولد</span>
+                        </div>
+                        <p className="text-white font-medium text-xs" dir="ltr">{otherUser.birthday}</p>
+                      </div>
+                    )}
+
+                    {/* Telegram ID - Only rendered if entered */}
+                    {(() => {
+                      const cleanTg = otherUser.telegramId ? otherUser.telegramId.trim().replace(/^@/, '') : '';
+                      if (!cleanTg) return null;
+                      return (
+                        <div className="p-3.5 bg-[#242f3d] rounded-2xl border border-white/5 flex items-center justify-between">
+                          <div className="space-y-0.5">
+                            <div className="flex items-center gap-2 text-[#708499] text-[11px] font-bold">
+                              <Send size={14} className="text-[#3390ec] -rotate-45"/>
+                              <span>شناسه تلگرام</span>
+                            </div>
+                            <a 
+                              href={`https://t.me/${cleanTg}`} 
+                              target="_blank" 
+                              rel="noopener noreferrer"
+                              className="text-[#3390ec] hover:underline font-bold text-xs" 
+                              dir="ltr"
+                            >
+                              @{cleanTg}
+                            </a>
+                          </div>
+                          <button 
+                            onClick={() => handleCopyText(`@${cleanTg}`, 'telegram')}
+                            className="text-xs text-[#708499] hover:text-white flex items-center gap-1 bg-white/5 hover:bg-white/10 px-2.5 py-1.5 rounded-xl transition-colors font-medium"
+                          >
+                            {copiedField === 'telegram' ? <Check size={14} className="text-green-400"/> : <Copy size={14}/>}
+                            <span>{copiedField === 'telegram' ? 'کپی شد' : 'کپی'}</span>
+                          </button>
+                        </div>
+                      );
+                    })()}
+
+                    {/* Instagram ID - Only rendered if entered */}
+                    {(() => {
+                      const cleanIg = otherUser.instagramId ? otherUser.instagramId.trim().replace(/^@/, '') : '';
+                      if (!cleanIg) return null;
+                      return (
+                        <div className="p-3.5 bg-[#242f3d] rounded-2xl border border-white/5 flex items-center justify-between">
+                          <div className="space-y-0.5">
+                            <div className="flex items-center gap-2 text-[#708499] text-[11px] font-bold">
+                              <Instagram size={14} className="text-pink-400"/>
+                              <span>شناسه اینستاگرام</span>
+                            </div>
+                            <a 
+                              href={`https://instagram.com/${cleanIg}`} 
+                              target="_blank" 
+                              rel="noopener noreferrer"
+                              className="text-pink-400 hover:underline font-bold text-xs" 
+                              dir="ltr"
+                            >
+                              @{cleanIg}
+                            </a>
+                          </div>
+                          <button 
+                            onClick={() => handleCopyText(`@${cleanIg}`, 'instagram')}
+                            className="text-xs text-[#708499] hover:text-white flex items-center gap-1 bg-white/5 hover:bg-white/10 px-2.5 py-1.5 rounded-xl transition-colors font-medium"
+                          >
+                            {copiedField === 'instagram' ? <Check size={14} className="text-green-400"/> : <Copy size={14}/>}
+                            <span>{copiedField === 'instagram' ? 'کپی شد' : 'کپی'}</span>
+                          </button>
+                        </div>
+                      );
+                    })()}
 
                     {/* Mute Notifications Toggle */}
                     <div className="p-3.5 bg-[#242f3d] rounded-2xl border border-white/5 flex items-center justify-between">
@@ -1881,6 +2093,125 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                 <span>ارسال و هدایت</span>
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Per-Chat Custom Wallpaper Modal */}
+      {showWallpaperModal && (
+        <div 
+          className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in"
+          onClick={() => setShowWallpaperModal(false)}
+        >
+          <div 
+            className="w-full max-w-md bg-[#17212b] rounded-3xl overflow-hidden border border-white/10 shadow-2xl p-5 space-y-4 animate-pop max-h-[85vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-white/5 pb-3">
+              <h3 className="font-bold text-white text-sm flex items-center gap-2">
+                <Palette size={18} className="text-[#3390ec]" />
+                <span>پس‌زمینه اختصاصی این گفتگو</span>
+              </h3>
+              <button onClick={() => setShowWallpaperModal(false)} className="p-1 hover:bg-white/10 rounded-full text-[#708499]">
+                <X size={18}/>
+              </button>
+            </div>
+
+            <p className="text-xs text-[#708499]">
+              می‌توانید برای این گفتگو یک پس‌زمینه ویژه مشخص کنید یا از طرح‌های آماده استفاده کنید:
+            </p>
+
+            <div className="grid grid-cols-3 gap-2 overflow-y-auto custom-scrollbar p-1">
+              {WALLPAPER_PRESETS.map((p) => {
+                const isSelected = (chat.wallpaper || '') === p.id;
+                return (
+                  <div
+                    key={p.id}
+                    onClick={() => {
+                      onAction('updateChatWallpaper', { wallpaper: p.id });
+                    }}
+                    className={`group relative rounded-xl p-2 h-24 border cursor-pointer transition-all flex flex-col justify-between overflow-hidden shadow-sm hover:scale-[1.02] ${
+                      isSelected ? 'border-[#3390ec] ring-2 ring-[#3390ec]/30' : 'border-white/10 hover:border-white/20'
+                    }`}
+                    style={p.style}
+                  >
+                    <span className="text-[9px] font-bold text-white/90 bg-black/50 px-1.5 py-0.5 rounded-full backdrop-blur-xs truncate">
+                      {p.name}
+                    </span>
+                    {isSelected && (
+                      <span className="w-5 h-5 rounded-full bg-[#3390ec] text-white flex items-center justify-center shadow-md self-end">
+                        <Check size={12} className="stroke-[3]" />
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Custom File Upload & URL */}
+            <div className="bg-[#242f3d] p-3 rounded-2xl border border-white/5 space-y-2.5">
+              <input
+                ref={chatWallpaperFileRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={async (e) => {
+                  const file = e.target.files?.[0];
+                  if (file) {
+                    try {
+                      const compressed = await compressImage(file, 1280, 1280, 0.82);
+                      onAction('updateChatWallpaper', { wallpaper: compressed });
+                    } catch (err) {
+                      console.error('Wallpaper compression error:', err);
+                    }
+                  }
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => chatWallpaperFileRef.current?.click()}
+                className="w-full py-2 bg-[#3390ec]/15 hover:bg-[#3390ec]/25 border border-[#3390ec]/40 rounded-xl text-xs font-bold text-[#3390ec] flex items-center justify-center gap-1.5 transition-all"
+              >
+                <ImageIcon size={14} />
+                <span>بارگذاری عکس دلخواه از دستگاه</span>
+              </button>
+
+              <div className="flex items-center gap-2">
+                <input
+                  value={customChatWallpaperUrl}
+                  onChange={(e) => setCustomChatWallpaperUrl(e.target.value)}
+                  placeholder="آدرس اینترنتی تصویر..."
+                  dir="ltr"
+                  className="flex-1 bg-[#17212b] p-2 rounded-xl text-xs text-white outline-none border border-white/5 focus:border-[#3390ec] transition-colors"
+                />
+                <button
+                  type="button"
+                  disabled={!customChatWallpaperUrl.trim()}
+                  onClick={() => {
+                    if (customChatWallpaperUrl.trim()) {
+                      onAction('updateChatWallpaper', { wallpaper: customChatWallpaperUrl.trim() });
+                      setCustomChatWallpaperUrl('');
+                    }
+                  }}
+                  className="py-2 px-3 bg-[#3390ec] hover:bg-[#2881d9] disabled:opacity-40 rounded-xl text-xs font-bold text-white transition-all"
+                >
+                  اعمال
+                </button>
+              </div>
+            </div>
+
+            {chat.wallpaper && (
+              <button
+                type="button"
+                onClick={() => {
+                  onAction('updateChatWallpaper', { wallpaper: '' });
+                }}
+                className="w-full py-2.5 bg-white/5 hover:bg-white/10 rounded-xl text-xs text-[#708499] hover:text-white flex items-center justify-center gap-1.5 transition-colors"
+              >
+                <RotateCcw size={14} />
+                <span>استفاده از پس‌زمینه پیش‌فرض کلی برنامه</span>
+              </button>
+            )}
           </div>
         </div>
       )}

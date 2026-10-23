@@ -528,13 +528,14 @@ app.post('/api/auth/register', wrap(async (req, res) => {
   if (!validUsername(username)) return res.status(400).json({ success: false, message: 'نام کاربری نامعتبر است (۳ تا ۳۲ کاراکتر بدون فاصله).' });
   if (password.length < 6) return res.status(400).json({ success: false, message: 'رمز عبور باید حداقل ۶ کاراکتر باشد.' });
   if (await dbAdapter.getDoc('users', username)) return res.status(409).json({ success: false, message: 'این نام کاربری قبلاً ثبت شده است.' });
+  const now = Date.now();
   const user = {
     id: username, username, displayName, passwordHash: hashPassword(password),
     avatar: typeof req.body?.avatar === 'string' && req.body.avatar.length < 20000 ? req.body.avatar : undefined,
-    status: 'online', role: 'user', phone: '',
+    status: 'online', lastSeen: now, role: 'user', phone: '',
     theme: 'night', wallpaper: 'default', contacts: [], privacy: { showStatus: 'all', showAvatar: 'all' }
   };
-  await dbAdapter.putDoc('users', username, user, Date.now());
+  await dbAdapter.putDoc('users', username, user, now);
   res.json({ success: true, token: await createSession(username), user: publicUser(user) });
 }));
 
@@ -548,14 +549,17 @@ app.post('/api/auth/login', wrap(async (req, res) => {
     noteFail(key);
     return res.status(401).json({ success: false, message: 'نام کاربری یا رمز عبور اشتباه است.' });
   }
+  const now = Date.now();
   if (user.isBanned) {
-    if (user.bannedUntil && user.bannedUntil < Date.now()) {
+    if (user.bannedUntil && user.bannedUntil < now) {
       user.isBanned = false; delete user.bannedUntil; delete user.banReason;
-      await dbAdapter.putDoc('users', username, user, Date.now());
     } else {
       return res.status(403).json({ success: false, message: user.banReason ? `حساب شما مسدود شده است: ${user.banReason}` : 'حساب شما مسدود شده است.' });
     }
   }
+  user.lastSeen = now;
+  user.status = 'online';
+  await dbAdapter.putDoc('users', username, user, now);
   attempts.delete(key);
   res.json({ success: true, token: await createSession(username), user: publicUser(user) });
 }));
@@ -582,8 +586,25 @@ async function auth(req, res, next) {
 
 app.get('/api/auth/me', auth, (req, res) => res.json({ success: true, user: publicUser(req.user) }));
 app.post('/api/auth/logout', auth, wrap(async (req, res) => {
+  const user = await dbAdapter.getDoc('users', req.user.id);
+  if (user) {
+    user.lastSeen = Date.now();
+    user.status = 'offline';
+    await dbAdapter.putDoc('users', req.user.id, user, Date.now());
+  }
   await dbAdapter.deleteSession(req.tokenHash);
   res.json({ success: true });
+}));
+
+app.post('/api/users/heartbeat', auth, wrap(async (req, res) => {
+  const now = Date.now();
+  const user = await dbAdapter.getDoc('users', req.user.id);
+  if (user) {
+    user.lastSeen = now;
+    user.status = 'online';
+    await dbAdapter.putDoc('users', req.user.id, user, now);
+  }
+  res.json({ success: true, timestamp: now });
 }));
 
 const COLLECTION_RE = /^[a-z_]{1,64}$/;

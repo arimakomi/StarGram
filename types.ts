@@ -21,6 +21,11 @@ export interface Poll {
   totalVotes: number;
 }
 
+export interface MessageSeenInfo {
+  userId: string;
+  seenAt: number;
+}
+
 export interface Message {
   id: string;
   senderId: string;
@@ -37,6 +42,9 @@ export interface Message {
   forwardedFrom?: string;
   isEncrypted?: boolean;
   encryptedIv?: string;
+  seenBy?: MessageSeenInfo[];
+  viewsCount?: number;
+  viewers?: string[];
 }
 
 export interface AdminPermissions {
@@ -63,8 +71,12 @@ export interface User {
   password?: string;
   avatar: string;
   status: 'online' | 'offline' | 'typing...';
+  lastSeen?: number;
   bio?: string;
   phone?: string;
+  birthday?: string;
+  telegramId?: string;
+  instagramId?: string;
   role?: 'superadmin' | 'admin' | 'user';
   isBanned?: boolean;
   bannedUntil?: number; // timestamp for temporary ban
@@ -105,6 +117,7 @@ export interface Chat {
   publicHandle?: string;
   slowMode?: number;
   participantIds?: string[];
+  wallpaper?: string;
 }
 
 export type FolderType = 'all' | 'private' | 'groups' | 'channels' | 'saved';
