@@ -383,3 +383,23 @@ export function onSnapshot<T = any>(
     }
   };
 }
+
+export function getAllDatabaseCollectionsData(): Record<string, Record<string, any>> {
+  const result: Record<string, Record<string, any>> = {};
+  for (const cName of SYNC_COLLECTIONS) {
+    result[cName] = { ...getCollectionStore(cName) };
+  }
+  return result;
+}
+
+export function restoreAllDatabaseCollectionsData(data: Record<string, Record<string, any>>) {
+  for (const cName of SYNC_COLLECTIONS) {
+    if (data[cName] && typeof data[cName] === 'object') {
+      setCollectionStore(cName, data[cName]);
+    }
+  }
+}
+
+export function getRawCollectionStore(collectionName: string): Record<string, any> {
+  return { ...getCollectionStore(collectionName) };
+}

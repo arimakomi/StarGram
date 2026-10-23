@@ -104,6 +104,16 @@ const App: React.FC = () => {
     return () => unsubscribe();
   }, [currentUser]);
 
+  // Auto-clear unreadCount when activeChatId is viewed
+  useEffect(() => {
+    if (!activeChatId) return;
+    const current = chats.find(c => c.id === activeChatId);
+    if (current && (current.unreadCount || 0) > 0) {
+      const chatRef = doc(db, "chats", activeChatId);
+      updateDoc(chatRef, { unreadCount: 0 });
+    }
+  }, [activeChatId, chats]);
+
   // 3. Real-time Stories Sync
   useEffect(() => {
     const q = collection(db, "stories");

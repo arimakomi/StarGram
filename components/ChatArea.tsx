@@ -1295,6 +1295,14 @@ const ChatArea: React.FC<ChatAreaProps> = ({
         </div>
       )}
 
+      {/* Info Drawer Backdrop */}
+      {showInfo && (
+        <div 
+          className="fixed inset-0 bg-black/60 backdrop-blur-xs z-40 animate-in fade-in duration-200"
+          onClick={() => setShowInfo(false)}
+        />
+      )}
+
       {/* Info Drawer */}
       <div className={`fixed inset-y-0 left-0 w-full md:w-[380px] bg-[#17212b] border-r border-black/30 z-50 transition-transform duration-300 shadow-2xl flex flex-col ${showInfo ? 'translate-x-0' : '-translate-x-full'}`}>
         <div className="p-4 flex items-center justify-between bg-[#242f3d] border-b border-black/20 shrink-0">
@@ -1410,23 +1418,25 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                       </button>
                     </div>
 
-                    {/* Phone Number */}
-                    <div className="p-3.5 bg-[#242f3d] rounded-2xl border border-white/5 flex items-center justify-between">
-                      <div className="space-y-0.5">
-                        <div className="flex items-center gap-2 text-[#708499] text-[11px] font-bold">
-                          <Phone size={14} className="text-[#3390ec]"/>
-                          <span>شماره تماس</span>
+                    {/* Phone Number - Only rendered if user entered a phone number */}
+                    {Boolean(otherUser.phone && otherUser.phone.trim()) && (
+                      <div className="p-3.5 bg-[#242f3d] rounded-2xl border border-white/5 flex items-center justify-between">
+                        <div className="space-y-0.5">
+                          <div className="flex items-center gap-2 text-[#708499] text-[11px] font-bold">
+                            <Phone size={14} className="text-[#3390ec]"/>
+                            <span>شماره تماس</span>
+                          </div>
+                          <p className="text-white font-medium text-xs tabular-nums" dir="ltr">{otherUser.phone}</p>
                         </div>
-                        <p className="text-white font-medium text-xs tabular-nums" dir="ltr">+98 912 345 6789</p>
+                        <button 
+                          onClick={() => handleCopyText(otherUser.phone || '', 'phone')}
+                          className="text-xs text-[#708499] hover:text-white flex items-center gap-1 bg-white/5 hover:bg-white/10 px-2.5 py-1.5 rounded-xl transition-colors font-medium"
+                        >
+                          {copiedField === 'phone' ? <Check size={14} className="text-green-400"/> : <Copy size={14}/>}
+                          <span>{copiedField === 'phone' ? 'کپی شد' : 'کپی'}</span>
+                        </button>
                       </div>
-                      <button 
-                        onClick={() => handleCopyText('+989123456789', 'phone')}
-                        className="text-xs text-[#708499] hover:text-white flex items-center gap-1 bg-white/5 hover:bg-white/10 px-2.5 py-1.5 rounded-xl transition-colors font-medium"
-                      >
-                        {copiedField === 'phone' ? <Check size={14} className="text-green-400"/> : <Copy size={14}/>}
-                        <span>{copiedField === 'phone' ? 'کپی شد' : 'کپی'}</span>
-                      </button>
-                    </div>
+                    )}
 
                     {/* Mute Notifications Toggle */}
                     <div className="p-3.5 bg-[#242f3d] rounded-2xl border border-white/5 flex items-center justify-between">

@@ -1,11 +1,15 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { User, Chat, MessageReport, SystemConfig } from '../types';
 import { 
   X, Shield, Sliders, Users, Flag, MessageSquare, AlertTriangle, 
   Check, Ban, UserCheck, Key, ShieldOff, Trash2, Lock, Unlock, 
-  Search, RefreshCw, Clock, Filter, Eye, Power
+  Search, RefreshCw, Clock, Filter, Eye, Power,
+  Database, Download, Upload, HardDrive, FileJson, RotateCcw, CheckCircle2
 } from 'lucide-react';
-import { collection, getDocs, doc, setDoc, updateDoc, deleteDoc, db } from '../services/firebase';
+import { 
+  collection, getDocs, doc, setDoc, updateDoc, deleteDoc, db,
+  getAllDatabaseCollectionsData, restoreAllDatabaseCollectionsData, getRawCollectionStore
+} from '../services/firebase';
 
 interface AdminPanelModalProps {
   currentUser: User;
@@ -22,7 +26,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
   onClose,
   onRefreshData
 }) => {
-  const [activeTab, setActiveTab] = useState<'system' | 'reports' | 'users' | 'chats'>('system');
+  const [activeTab, setActiveTab] = useState<'system' | 'reports' | 'users' | 'chats' | 'database'>('system');
 
   // System Config state
   const [cfg, setCfg] = useState<SystemConfig>(systemConfig);
@@ -46,6 +50,32 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
   const [chatsList, setChatsList] = useState<Chat[]>([]);
   const [chatSearchQuery, setChatSearchQuery] = useState('');
   const [loadingChats, setLoadingChats] = useState(false);
+
+  // Database Tab state
+  const [selectedDbCollection, setSelectedDbCollection] = useState<'users' | 'chats' | 'stories' | 'reports' | 'system_config'>('users');
+  const [dbCollectionStore, setDbCollectionStore] = useState<Record<string, any>>({});
+  const [selectedDbDocId, setSelectedDbDocId] = useState<string | null>(null);
+  const [dbSearchQuery, setDbSearchQuery] = useState('');
+  const [dbSuccessNotice, setDbSuccessNotice] = useState<string | null>(null);
+  const [dbErrorNotice, setDbErrorNotice] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const refreshDbStore = () => {
+    const raw = getRawCollectionStore(selectedDbCollection);
+    setDbCollectionStore(raw);
+    const keys = Object.keys(raw);
+    if (keys.length > 0 && (!selectedDbDocId || !raw[selectedDbDocId])) {
+      setSelectedDbDocId(keys[0]);
+    } else if (keys.length === 0) {
+      setSelectedDbDocId(null);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'database') {
+      refreshDbStore();
+    }
+  }, [activeTab, selectedDbCollection]);
 
   // Load Reports
   const loadReports = async () => {
@@ -268,6 +298,87 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
     }
   };
 
+  // Database Operations Handlers
+  const handleExportFullBackup = () => {
+    try {
+      const allData = getAllDatabaseCollectionsData();
+      const backupPayload = {
+        app: 'Starly Messenger',
+        version: '1.0.0',
+        exportedAt: new Date().toISOString(),
+        timestamp: Date.now(),
+        collections: allData
+      };
+      const blob = new Blob([JSON.stringify(backupPayload, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `starly_db_backup_${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      setDbSuccessNotice('فایل پشتیبان کامل دیتابیس با موفقیت دانلود شد.');
+      setTimeout(() => setDbSuccessNotice(null), 3000);
+    } catch (err) {
+      console.error(err);
+      setDbErrorNotice('خطا در تهیه فایل پشتیبان.');
+      setTimeout(() => setDbErrorNotice(null), 3000);
+    }
+  };
+
+  const handleImportBackup = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (loadEvent) => {
+      try {
+        const text = loadEvent.target?.result as string;
+        const parsed = JSON.parse(text);
+        if (!parsed.collections || typeof parsed.collections !== 'object') {
+          throw new Error('فرمت فایل نامعتبر است. شیء collections یافت نشد.');
+        }
+
+        if (confirm('آیا از بازگردانی این فایل مطمئن هستید؟ تمامی اطلاعات دیتابیس فعلی با این فایل جایگزین خواهند شد.')) {
+          restoreAllDatabaseCollectionsData(parsed.collections);
+          refreshDbStore();
+          if (onRefreshData) onRefreshData();
+          setDbSuccessNotice('پایگاه‌داده با موفقیت از فایل پشتیبان بازگردانی شد.');
+          setTimeout(() => setDbSuccessNotice(null), 3500);
+        }
+      } catch (err: any) {
+        console.error('Restore Error:', err);
+        setDbErrorNotice(err.message || 'خطا در بارگذاری و پردازش فایل پشتیبان.');
+        setTimeout(() => setDbErrorNotice(null), 3500);
+      } finally {
+        if (fileInputRef.current) fileInputRef.current.value = '';
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const handleDeleteDbDoc = async (docId: string) => {
+    if (confirm(`آیا از حذف رکورد «${docId}» از کالکشن «${selectedDbCollection}» مطمئن هستید؟`)) {
+      try {
+        await deleteDoc(doc(db, selectedDbCollection, docId));
+        refreshDbStore();
+        if (onRefreshData) onRefreshData();
+        setDbSuccessNotice(`رکورد «${docId}» با موفقیت حذف شد.`);
+        setTimeout(() => setDbSuccessNotice(null), 3000);
+      } catch (err) {
+        console.error(err);
+        setDbErrorNotice('خطا در حذف رکورد.');
+        setTimeout(() => setDbErrorNotice(null), 3000);
+      }
+    }
+  };
+
+  const dbAllData = activeTab === 'database' ? getAllDatabaseCollectionsData() : {};
+  const dbTotalDocsCount = Object.values(dbAllData).reduce((acc, col) => acc + Object.keys(col || {}).length, 0);
+  const dbEstimatedBytes = JSON.stringify(dbAllData).length;
+  const dbEstimatedSizeKb = (dbEstimatedBytes / 1024).toFixed(1);
+
   const filteredReports = reports.filter(r => {
     if (reportFilter === 'all') return true;
     return r.status === reportFilter;
@@ -293,10 +404,14 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
   });
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-xs p-2 sm:p-4 animate-in fade-in duration-200">
+    <div 
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-xs p-2 sm:p-4 animate-in fade-in duration-200"
+      onClick={onClose}
+    >
       <div 
         className="w-full max-w-4xl bg-[#17212b] text-white rounded-2xl shadow-2xl overflow-hidden flex flex-col h-[90vh] max-h-[850px] border border-[#242f3d]"
         dir="rtl"
+        onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-[#242f3d] bg-[#0e1621]">
@@ -361,6 +476,15 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
           >
             <MessageSquare className="w-4 h-4" />
             کانال‌ها و گروه‌ها ({chatsList.length || '...'})
+          </button>
+          <button
+            onClick={() => setActiveTab('database')}
+            className={`px-4 py-2 text-xs font-semibold rounded-xl transition-colors flex items-center gap-2 shrink-0 ${
+              activeTab === 'database' ? 'bg-[#5288c1] text-white shadow-xs' : 'text-gray-400 hover:text-white hover:bg-[#242f3d]'
+            }`}
+          >
+            <Database className="w-4 h-4 text-emerald-400" />
+            مدیریت پایگاه‌داده
           </button>
         </div>
 
@@ -803,6 +927,235 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                 ))}
               </div>
             )}
+          </div>
+        )}
+
+        {/* Tab 5: Database Operations & Document Explorer */}
+        {activeTab === 'database' && (
+          <div className="flex-1 overflow-y-auto p-6 flex flex-col space-y-5">
+            {/* Notification Alerts */}
+            {dbSuccessNotice && (
+              <div className="flex items-center gap-2 p-3 bg-emerald-500/15 border border-emerald-500/30 rounded-xl text-emerald-300 text-xs animate-in fade-in duration-200">
+                <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
+                <span>{dbSuccessNotice}</span>
+              </div>
+            )}
+            {dbErrorNotice && (
+              <div className="flex items-center gap-2 p-3 bg-rose-500/15 border border-rose-500/30 rounded-xl text-rose-300 text-xs animate-in fade-in duration-200">
+                <AlertTriangle className="w-4 h-4 shrink-0 text-rose-400" />
+                <span>{dbErrorNotice}</span>
+              </div>
+            )}
+
+            {/* Metrics Overview Cards */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="bg-[#0e1621] border border-[#242f3d] p-3.5 rounded-xl">
+                <div className="flex items-center justify-between text-gray-400 mb-1">
+                  <span className="text-[11px] font-medium">کل رکوردهای دیتابیس</span>
+                  <Database className="w-4 h-4 text-[#5288c1]" />
+                </div>
+                <p className="text-xl font-bold text-white tabular-nums">{dbTotalDocsCount}</p>
+                <p className="text-[10px] text-gray-400 mt-0.5">در ۵ کالکشن اصلی</p>
+              </div>
+
+              <div className="bg-[#0e1621] border border-[#242f3d] p-3.5 rounded-xl">
+                <div className="flex items-center justify-between text-gray-400 mb-1">
+                  <span className="text-[11px] font-medium">حجم تخمینی داده‌ها</span>
+                  <HardDrive className="w-4 h-4 text-emerald-400" />
+                </div>
+                <p className="text-xl font-bold text-emerald-300 tabular-nums" dir="ltr">{dbEstimatedSizeKb} KB</p>
+                <p className="text-[10px] text-gray-400 mt-0.5">کامپکت و بهینه‌سازی شده</p>
+              </div>
+
+              <div className="bg-[#0e1621] border border-[#242f3d] p-3.5 rounded-xl">
+                <div className="flex items-center justify-between text-gray-400 mb-1">
+                  <span className="text-[11px] font-medium">تعداد کل گفتگوها</span>
+                  <MessageSquare className="w-4 h-4 text-amber-400" />
+                </div>
+                <p className="text-xl font-bold text-white tabular-nums">
+                  {Object.keys(dbAllData.chats || {}).length}
+                </p>
+                <p className="text-[10px] text-gray-400 mt-0.5">خصوصی، گروه‌ها و کانال‌ها</p>
+              </div>
+
+              <div className="bg-[#0e1621] border border-[#242f3d] p-3.5 rounded-xl">
+                <div className="flex items-center justify-between text-gray-400 mb-1">
+                  <span className="text-[11px] font-medium">کاربران ثبت‌شده</span>
+                  <Users className="w-4 h-4 text-purple-400" />
+                </div>
+                <p className="text-xl font-bold text-white tabular-nums">
+                  {Object.keys(dbAllData.users || {}).length}
+                </p>
+                <p className="text-[10px] text-gray-400 mt-0.5">با دسترسی مجاز و مسدود</p>
+              </div>
+            </div>
+
+            {/* Quick Operations Toolbar */}
+            <div className="bg-[#0e1621] border border-[#242f3d] p-4 rounded-2xl space-y-3">
+              <h3 className="text-xs font-bold text-gray-200 flex items-center gap-2">
+                <Sliders className="w-4 h-4 text-[#5288c1]" />
+                عملیات جامع پایگاه داده (Backup & Restore)
+              </h3>
+              <p className="text-xs text-gray-400 leading-relaxed">
+                می‌توانید تمامی جداول و اطلاعات سیستم را به عنوان یک فایل پشتیبان استاندارد JSON دانلود کرده یا فایل قبلی را بازگردانی نمایید.
+              </p>
+
+              <div className="flex items-center gap-3 pt-1 flex-wrap">
+                <button
+                  onClick={handleExportFullBackup}
+                  className="px-4 py-2.5 bg-[#5288c1] hover:bg-[#4375a8] text-white rounded-xl text-xs font-semibold transition-all flex items-center gap-2 shadow-sm shadow-[#5288c1]/30 active:scale-95"
+                >
+                  <Download className="w-4 h-4" />
+                  دانلود نسخه پشتیبان کامل (JSON Backup)
+                </button>
+
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="px-4 py-2.5 bg-[#242f3d] hover:bg-[#2e3c4e] text-emerald-300 border border-emerald-500/30 rounded-xl text-xs font-semibold transition-all flex items-center gap-2 active:scale-95"
+                >
+                  <Upload className="w-4 h-4" />
+                  بازگردانی دیتابیس از فایل JSON
+                </button>
+
+                <button
+                  onClick={refreshDbStore}
+                  className="px-3.5 py-2.5 bg-[#17212b] hover:bg-[#242f3d] text-gray-300 rounded-xl text-xs font-medium transition-colors flex items-center gap-1.5 mr-auto"
+                  title="تازه‌سازی محتویات"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  بروزرسانی زنده
+                </button>
+
+                {/* Hidden File Input for Restore */}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".json,application/json"
+                  className="hidden"
+                  onChange={handleImportBackup}
+                />
+              </div>
+            </div>
+
+            {/* Collection Document Explorer */}
+            <div className="bg-[#0e1621] border border-[#242f3d] rounded-2xl overflow-hidden flex flex-col flex-1 min-h-[350px]">
+              <div className="p-3.5 border-b border-[#242f3d] flex items-center justify-between flex-wrap gap-2 bg-[#121b24]">
+                <div className="flex items-center gap-2">
+                  <FileJson className="w-4 h-4 text-emerald-400" />
+                  <span className="text-xs font-bold text-white">مرورگر اسناد و داده‌های خام کالکشن‌ها</span>
+                </div>
+
+                {/* Collection Switcher Tabs */}
+                <div className="flex items-center gap-1 bg-[#17212b] p-1 rounded-xl border border-[#242f3d]">
+                  {[
+                    { id: 'users', label: 'کاربران' },
+                    { id: 'chats', label: 'چت‌ها' },
+                    { id: 'stories', label: 'استوری‌ها' },
+                    { id: 'reports', label: 'گزارش‌ها' },
+                    { id: 'system_config', label: 'پیکربندی' }
+                  ].map(c => (
+                    <button
+                      key={c.id}
+                      onClick={() => {
+                        setSelectedDbCollection(c.id as any);
+                        setSelectedDbDocId(null);
+                      }}
+                      className={`px-3 py-1 text-xs rounded-lg transition-colors font-medium ${
+                        selectedDbCollection === c.id
+                          ? 'bg-[#5288c1] text-white shadow-xs'
+                          : 'text-gray-400 hover:text-white'
+                      }`}
+                    >
+                      {c.label} ({Object.keys(dbAllData[c.id] || {}).length})
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Explorer Split View */}
+              <div className="flex-1 grid grid-cols-1 md:grid-cols-12 min-h-[300px]">
+                {/* Doc Keys List (Right Pane in RTL) */}
+                <div className="md:col-span-5 border-l border-[#242f3d] p-3 flex flex-col space-y-2 bg-[#17212b]/40">
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={dbSearchQuery}
+                      onChange={(e) => setDbSearchQuery(e.target.value)}
+                      placeholder="جستجوی شناسه سند (ID)..."
+                      className="w-full bg-[#0e1621] border border-[#242f3d] rounded-xl px-3 py-1.5 text-white text-xs focus:outline-hidden focus:border-[#5288c1] pr-8"
+                    />
+                    <Search className="w-3.5 h-3.5 text-gray-500 absolute right-2.5 top-2.5" />
+                  </div>
+
+                  <div className="flex-1 overflow-y-auto space-y-1 max-h-[320px] custom-scrollbar">
+                    {Object.keys(dbCollectionStore)
+                      .filter(k => !dbSearchQuery || k.toLowerCase().includes(dbSearchQuery.toLowerCase()))
+                      .map(docKey => {
+                        const isSelected = selectedDbDocId === docKey;
+                        return (
+                          <div
+                            key={docKey}
+                            onClick={() => setSelectedDbDocId(docKey)}
+                            className={`p-2.5 rounded-xl cursor-pointer transition-colors flex items-center justify-between text-xs ${
+                              isSelected
+                                ? 'bg-[#5288c1] text-white font-semibold shadow-xs'
+                                : 'bg-[#0e1621] hover:bg-[#242f3d] text-gray-300'
+                            }`}
+                          >
+                            <span className="truncate max-w-[200px]" dir="ltr">#{docKey}</span>
+                            <span className="text-[10px] opacity-70">
+                              {Object.keys(dbCollectionStore[docKey] || {}).length} فیلد
+                            </span>
+                          </div>
+                        );
+                      })}
+
+                    {Object.keys(dbCollectionStore).length === 0 && (
+                      <div className="text-center text-gray-500 py-8 text-xs">
+                        هیچ سندی در این کالکشن ثبت نشده است.
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Doc Content Viewer (Left Pane in RTL) */}
+                <div className="md:col-span-7 p-4 flex flex-col space-y-2 bg-[#0e1621]">
+                  {selectedDbDocId && dbCollectionStore[selectedDbDocId] ? (
+                    <>
+                      <div className="flex items-center justify-between pb-2 border-b border-[#242f3d]">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-gray-400">سند انتخاب شده:</span>
+                          <span className="text-xs font-mono font-bold text-white bg-[#17212b] px-2 py-0.5 rounded-md border border-[#242f3d]" dir="ltr">
+                            {selectedDbDocId}
+                          </span>
+                        </div>
+
+                        <button
+                          onClick={() => handleDeleteDbDoc(selectedDbDocId)}
+                          className="px-2.5 py-1 bg-rose-600/80 hover:bg-rose-600 text-white rounded-lg text-xs font-medium transition-colors flex items-center gap-1"
+                          title="حذف این سند از دیتابیس"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          حذف رکورد
+                        </button>
+                      </div>
+
+                      <pre 
+                        className="flex-1 p-3.5 bg-[#121b24] border border-[#242f3d] rounded-xl text-xs font-mono text-emerald-300 overflow-x-auto max-h-[300px] custom-scrollbar select-text leading-relaxed" 
+                        dir="ltr"
+                      >
+                        {JSON.stringify(dbCollectionStore[selectedDbDocId], null, 2)}
+                      </pre>
+                    </>
+                  ) : (
+                    <div className="flex-1 flex flex-col items-center justify-center text-center p-8 text-gray-500 space-y-2">
+                      <FileJson className="w-10 h-10 text-gray-600" />
+                      <p className="text-xs">سندی را از لیست سمت راست برای مشاهده انتخاب نمایید.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
           </div>
         )}
 

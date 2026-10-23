@@ -66,10 +66,14 @@ export const MyProfileModal: React.FC<MyProfileModalProps> = ({ user, onClose, o
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-200">
+    <div 
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-200"
+      onClick={onClose}
+    >
       <div 
         className="w-full max-w-lg bg-[#17212b] text-white rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] border border-[#242f3d]"
         dir="rtl"
+        onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-[#242f3d] bg-[#0e1621]">

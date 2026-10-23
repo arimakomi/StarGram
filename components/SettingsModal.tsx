@@ -155,8 +155,14 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ user, onClose, onUpdateUs
   };
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-      <div className="w-full max-w-md bg-[#17212b] rounded-3xl overflow-hidden border border-white/5 shadow-2xl animate-in zoom-in h-[85vh] flex flex-col relative">
+    <div 
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
+      onClick={onClose}
+    >
+      <div 
+        className="w-full max-w-md bg-[#17212b] rounded-3xl overflow-hidden border border-white/5 shadow-2xl animate-in zoom-in h-[85vh] flex flex-col relative"
+        onClick={(e) => e.stopPropagation()}
+      >
         
         {/* Passcode Setup Overlay */}
         {passcodeStep > 0 && (

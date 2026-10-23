@@ -5,7 +5,7 @@ import {
   ChevronLeft, Image as ImageIcon, MessageCircle, Lock, Globe, Check, UserPlus, 
   Trash, UserCheck, Camera, Phone, UserX, Pin, PinOff, Bell, BellOff, 
   Archive, ArchiveRestore, CheckCheck, RotateCcw, ChevronDown, ChevronUp,
-  Shield, User as UserIcon, Sparkles
+  Shield, User as UserIcon, Sparkles, Heart
 } from 'lucide-react';
 import { collection, query, where, getDocs, db } from '../services/firebase';
 import { compressImage } from '../services/imageUtils';
@@ -491,11 +491,20 @@ const Sidebar: React.FC<SidebarProps> = ({
                       const avatar = chat.type === 'private' ? other?.avatar : chat.groupAvatar;
                       const lastMsg = chat.lastMessage;
                       const isSelected = activeChatId === chat.id;
+                      const hasReactions = Boolean(
+                        chat.messages?.some(m => Array.isArray(m.reactions) && m.reactions.length > 0 && m.reactions.some(r => r.count > 0)) ||
+                        (chat.lastMessage?.reactions && chat.lastMessage.reactions.length > 0 && chat.lastMessage.reactions.some(r => r.count > 0))
+                      );
 
                       return (
                         <div 
                           key={chat.id} 
-                          onClick={() => setActiveChatId(chat.id)} 
+                          onClick={() => {
+                            setActiveChatId(chat.id);
+                            if (chat.unreadCount > 0 && onMarkReadChat) {
+                              onMarkReadChat(chat.id);
+                            }
+                          }} 
                           onContextMenu={(e) => handleContextMenu(e, chat)}
                           onTouchStart={(e) => handleTouchStart(e, chat)}
                           onTouchMove={handleTouchMove}
@@ -539,15 +548,27 @@ const Sidebar: React.FC<SidebarProps> = ({
                                 )}
                               </div>
                             </div>
-                            <div className="flex justify-between items-center">
-                              <p className={`text-[12px] truncate max-w-[210px] ${isSelected ? 'text-white/85' : 'text-[#708499]'}`}>
+                            <div className="flex justify-between items-center mt-1">
+                              <p className={`text-[12px] truncate max-w-[200px] ${isSelected ? 'text-white/85' : 'text-[#708499]'}`}>
                                 {lastMsg ? (lastMsg.senderId === currentUser.id ? 'شما: ' : '') + (lastMsg.text || (lastMsg.imageUrl ? 'تصویر' : (lastMsg.audioUrl ? 'پیام صوتی' : 'پیام'))) : 'پیامی ارسال نشده'}
                               </p>
-                              {chat.unreadCount > 0 && (
-                                <div className={`px-1.5 py-0.5 min-w-[18px] h-[18px] rounded-full text-[10px] flex items-center justify-center font-bold tabular-nums ${isSelected ? 'bg-white text-[#3390ec]' : 'bg-[#3390ec] text-white'}`}>
-                                  {chat.unreadCount}
-                                </div>
-                              )}
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                {hasReactions && (
+                                  <span title="دارای ری‌اکشن به پیام‌ها" className="inline-flex items-center justify-center">
+                                    <Heart size={13} className="text-rose-500 fill-rose-500 drop-shadow-[0_0_5px_rgba(244,63,94,0.4)]" />
+                                  </span>
+                                )}
+                                {chat.unreadCount > 0 && (
+                                  <div 
+                                    className={`px-2 py-0.5 min-w-[20px] h-[20px] rounded-full text-[10.5px] flex items-center justify-center font-bold tabular-nums shadow-sm transition-all duration-200 animate-in zoom-in-75 ${
+                                      isSelected ? 'bg-white text-[#3390ec]' : 'bg-[#3390ec] text-white shadow-[#3390ec]/30'
+                                    }`}
+                                    title={`${chat.unreadCount} پیام جدید`}
+                                  >
+                                    {chat.unreadCount > 99 ? '+99' : chat.unreadCount}
+                                  </div>
+                                )}
+                              </div>
                             </div>
                           </div>
                         </div>
@@ -565,11 +586,20 @@ const Sidebar: React.FC<SidebarProps> = ({
               const avatar = chat.type === 'private' ? other?.avatar : chat.groupAvatar;
               const lastMsg = chat.lastMessage;
               const isSelected = activeChatId === chat.id;
+              const hasReactions = Boolean(
+                chat.messages?.some(m => Array.isArray(m.reactions) && m.reactions.length > 0 && m.reactions.some(r => r.count > 0)) ||
+                (chat.lastMessage?.reactions && chat.lastMessage.reactions.length > 0 && chat.lastMessage.reactions.some(r => r.count > 0))
+              );
 
               return (
                 <div 
                   key={chat.id} 
-                  onClick={() => setActiveChatId(chat.id)} 
+                  onClick={() => {
+                    setActiveChatId(chat.id);
+                    if (chat.unreadCount > 0 && onMarkReadChat) {
+                      onMarkReadChat(chat.id);
+                    }
+                  }} 
                   onContextMenu={(e) => handleContextMenu(e, chat)}
                   onTouchStart={(e) => handleTouchStart(e, chat)}
                   onTouchMove={handleTouchMove}
@@ -613,15 +643,27 @@ const Sidebar: React.FC<SidebarProps> = ({
                         )}
                       </div>
                     </div>
-                    <div className="flex justify-between items-center">
-                      <p className={`text-[12px] truncate max-w-[210px] ${isSelected ? 'text-white/85' : 'text-[#708499]'}`}>
+                    <div className="flex justify-between items-center mt-1">
+                      <p className={`text-[12px] truncate max-w-[200px] ${isSelected ? 'text-white/85' : 'text-[#708499]'}`}>
                         {lastMsg ? (lastMsg.senderId === currentUser.id ? 'شما: ' : '') + (lastMsg.text || (lastMsg.imageUrl ? 'تصویر' : (lastMsg.audioUrl ? 'پیام صوتی' : 'پیام'))) : 'پیامی ارسال نشده'}
                       </p>
-                      {chat.unreadCount > 0 && (
-                        <div className={`px-1.5 py-0.5 min-w-[18px] h-[18px] rounded-full text-[10px] flex items-center justify-center font-bold tabular-nums ${isSelected ? 'bg-white text-[#3390ec]' : 'bg-[#3390ec] text-white'}`}>
-                          {chat.unreadCount}
-                        </div>
-                      )}
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {hasReactions && (
+                          <span title="دارای ری‌اکشن به پیام‌ها" className="inline-flex items-center justify-center">
+                            <Heart size={13} className="text-rose-500 fill-rose-500 drop-shadow-[0_0_5px_rgba(244,63,94,0.4)]" />
+                          </span>
+                        )}
+                        {chat.unreadCount > 0 && (
+                          <div 
+                            className={`px-2 py-0.5 min-w-[20px] h-[20px] rounded-full text-[10.5px] flex items-center justify-center font-bold tabular-nums shadow-sm transition-all duration-200 animate-in zoom-in-75 ${
+                              isSelected ? 'bg-white text-[#3390ec]' : 'bg-[#3390ec] text-white shadow-[#3390ec]/30'
+                            }`}
+                            title={`${chat.unreadCount} پیام جدید`}
+                          >
+                            {chat.unreadCount > 99 ? '+99' : chat.unreadCount}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>
