@@ -1,36 +1,39 @@
-
-import { GoogleGenAI } from "@google/genai";
+import { getToken } from './auth';
 
 export class GeminiService {
-  private ai: GoogleGenAI;
-
-  constructor() {
-    const apiKey = (typeof process !== 'undefined' && process.env ? (process.env.API_KEY || process.env.GEMINI_API_KEY) : '') 
-      || (import.meta as any).env?.VITE_GEMINI_API_KEY 
-      || '';
-    this.ai = new GoogleGenAI(apiKey ? { apiKey } : {});
-  }
-
   async *getChatResponseStream(prompt: string, history: { role: 'user' | 'model', text: string }[]) {
     try {
-      const responseStream = await this.ai.models.generateContentStream({
-        model: 'gemini-2.5-flash',
-        contents: [
-          ...history.map(h => ({ role: h.role, parts: [{ text: h.text }] })),
-          { role: 'user', parts: [{ text: prompt }] }
-        ],
-        config: {
-          systemInstruction: "You are a friendly AI assistant in GeminiGram. Respond in Persian. Keep it conversational and brief. Use emojis.",
-          temperature: 0.8,
-        }
+      const token = getToken();
+      const res = await fetch('/api/ai/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify({ prompt, history })
       });
 
-      for await (const chunk of responseStream) {
-        yield chunk.text;
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        const msg = errorData.message || 'خطا در ارتباط با هوش مصنوعی؛ لطفاً کلید API و وضعیت آن را در پنل ادمین بررسی کنید.';
+        yield msg;
+        return;
       }
-    } catch (error) {
-      console.error("Gemini API Error:", error);
-      yield "خطایی در برقراری ارتباط با هوش مصنوعی رخ داد.";
+
+      const data = await res.json();
+      const reply = data.reply || 'پاسخی دریافت نشد.';
+
+      // شبیه‌سازی استریمینگ واژه به واژه برای تجربه کاربری روان
+      const words = reply.split(' ');
+      for (let i = 0; i < words.length; i++) {
+        yield (i === 0 ? '' : ' ') + words[i];
+        if (i % 3 === 0) {
+          await new Promise(r => setTimeout(r, 25));
+        }
+      }
+    } catch (error: any) {
+      console.warn("AI Chat Request Notice:", error);
+      yield "دستیار هوش مصنوعی در حال حاضر در دسترس نیست یا در پنل ادمین فعال نشده است.";
     }
   }
 }

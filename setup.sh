@@ -98,88 +98,53 @@ if [[ -z "$ADMIN_PASS" ]]; then ADMIN_PASS="$(rand 16)"; GENERATED_ADMIN=1; fi
 [[ ${#ADMIN_PASS} -ge 6 ]] || die "رمز ادمین باید حداقل ۶ کاراکتر باشد."
 
 echo
-info "تنظیمات دیتابیس (MySQL / MariaDB)"
-ask DB_HOST "آدرس دیتابیس" "127.0.0.1"
-ask DB_PORT "پورت دیتابیس" "3306"
-ask DB_NAME "نام دیتابیس" "stargram"
-ask DB_USER "نام کاربری دیتابیس" "stargram"
-ask_secret DB_PASS "رمز دیتابیس"
-GENERATED_DB=0
-if [[ -z "$DB_PASS" ]]; then DB_PASS="$(rand 20)"; GENERATED_DB=1; fi
-[[ "$DB_NAME" =~ ^[A-Za-z0-9_]+$ && "$DB_USER" =~ ^[A-Za-z0-9_]+$ ]] || die "نام دیتابیس و کاربر فقط می‌تواند شامل حروف انگلیسی، عدد و _ باشد."
-[[ "$DB_PASS" != *"'"* && "$DB_PASS" != *'"'* && "$DB_PASS" != *'\'* && "$DB_PASS" != *'$'* && "$DB_PASS" != *'`'* ]] || die "رمز دیتابیس نباید شامل ' \" \\ \$ \` باشد."
+info "انتخاب پایگاه‌داده (Database Engine)"
+ask DB_TYPE "نوع دیتابیس (mysql / postgres / local)" "mysql"
+DB_TYPE="$(echo "$DB_TYPE" | tr '[:upper:]' '[:lower:]')"
 
-# ───────── ۴) آماده‌سازی دیتابیس ─────────
-sql_client() { command -v mariadb >/dev/null 2>&1 && echo mariadb || echo mysql; }
-db_login_ok() {
-  node -e "
-    import('mysql2/promise').then(async m => {
-      try { const c = await m.createConnection({host:process.env.H,port:+process.env.P,user:process.env.U,password:process.env.W,database:process.env.D}); await c.end(); process.exit(0); }
-      catch(e){ process.exit(1); }
-    });" 2>/dev/null
-}
+if [[ "$DB_TYPE" == "local" ]]; then
+  ok "حالت ذخیره‌سازی محلی (Local JSON Storage) انتخاب شد؛ نیازی به نصب دیتابیس خارجی نیست."
+  DB_HOST=""
+  DB_PORT=""
+  DB_NAME=""
+  DB_USER=""
+  DB_PASS=""
+elif [[ "$DB_TYPE" == "postgres" || "$DB_TYPE" == "pgsql" ]]; then
+  info "تنظیمات PostgreSQL"
+  ask DB_HOST "آدرس سرور PostgreSQL" "127.0.0.1"
+  ask DB_PORT "پورت PostgreSQL" "5432"
+  ask DB_NAME "نام دیتابیس" "stargram"
+  ask DB_USER "نام کاربری PostgreSQL" "postgres"
+  ask_secret DB_PASS "رمز عبور PostgreSQL"
+  GENERATED_DB=0
+  if [[ -z "$DB_PASS" ]]; then DB_PASS="$(rand 20)"; GENERATED_DB=1; fi
+else
+  DB_TYPE="mysql"
+  info "تنظیمات دیتابیس MySQL / MariaDB"
+  ask DB_HOST "آدرس دیتابیس" "127.0.0.1"
+  ask DB_PORT "پورت دیتابیس" "3306"
+  ask DB_NAME "نام دیتابیس" "stargram"
+  ask DB_USER "نام کاربری دیتابیس" "stargram"
+  ask_secret DB_PASS "رمز دیتابیس"
+  GENERATED_DB=0
+  if [[ -z "$DB_PASS" ]]; then DB_PASS="$(rand 20)"; GENERATED_DB=1; fi
+fi
 
 info "نصب وابستگی‌ها (npm install)…"
 npm install --no-audit --no-fund >/dev/null 2>&1 || npm install --no-audit --no-fund
 ok "وابستگی‌ها نصب شد."
 
-if H="$DB_HOST" P="$DB_PORT" U="$DB_USER" W="$DB_PASS" D="$DB_NAME" db_login_ok; then
-  ok "اتصال به دیتابیس «$DB_NAME» با کاربر «$DB_USER» برقرار است."
-else
-  warn "اتصال مستقیم با این مشخصات ممکن نشد."
-  CLIENT="$(sql_client)"
-  if ! command -v "$CLIENT" >/dev/null 2>&1; then
-    if [[ "$NONINTERACTIVE" == "1" ]]; then die "دیتابیس در دسترس نیست و کلاینت MySQL/MariaDB نصب نیست."; fi
-    read -r -p "کلاینت MySQL/MariaDB نصب نیست. MariaDB روی همین سرور نصب شود؟ [y/N]: " yn || true
-    if [[ "${yn:-n}" =~ ^[Yy] ]]; then
-      case "$PM" in
-        dnf|yum) "$PM" install -y mariadb-server mariadb ;;
-        apt)     DEBIAN_FRONTEND=noninteractive apt-get install -y mariadb-server mariadb-client ;;
-        *)       die "پکیج‌منیجر شناخته نشد." ;;
-      esac
-      systemctl enable --now mariadb 2>/dev/null || systemctl enable --now mysqld 2>/dev/null || true
-      CLIENT="$(sql_client)"
-    else
-      die "ابتدا دیتابیس را آماده کنید یا مشخصات درست را وارد کنید."
-    fi
-  fi
-  info "برای ساخت دیتابیس و کاربر، دسترسی مدیر دیتابیس لازم است."
-  ROOT_ARGS=(-h "$DB_HOST" -P "$DB_PORT")
-  if [[ "$DB_HOST" == "127.0.0.1" || "$DB_HOST" == "localhost" ]] && "$CLIENT" -u root -e "SELECT 1" >/dev/null 2>&1; then
-    ROOT_ARGS=(-u root)          # احراز هویت socket برای root محلی
-    ok "با root محلی (socket) وارد شدیم."
-  else
-    DB_ROOT_USER="${DB_ROOT_USER:-}"; DB_ROOT_PASS="${DB_ROOT_PASS:-}"
-    ask DB_ROOT_USER "کاربر مدیر دیتابیس برای ساخت دیتابیس" "root"
-    if [[ -z "$DB_ROOT_PASS" && "$NONINTERACTIVE" != "1" ]]; then read -r -s -p "رمز کاربر مدیر دیتابیس: " DB_ROOT_PASS || true; echo; fi
-    ROOT_ARGS+=(-u "$DB_ROOT_USER")
-    export MYSQL_PWD="$DB_ROOT_PASS"
-  fi
-  HOSTPART="localhost"; [[ "$DB_HOST" != "127.0.0.1" && "$DB_HOST" != "localhost" ]] && HOSTPART="%"
-  "$CLIENT" "${ROOT_ARGS[@]}" <<SQL
-CREATE DATABASE IF NOT EXISTS \`$DB_NAME\` CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
-CREATE USER IF NOT EXISTS '$DB_USER'@'$HOSTPART' IDENTIFIED BY '$DB_PASS';
-ALTER USER '$DB_USER'@'$HOSTPART' IDENTIFIED BY '$DB_PASS';
-GRANT ALL PRIVILEGES ON \`$DB_NAME\`.* TO '$DB_USER'@'$HOSTPART';
-$( [[ "$HOSTPART" == "localhost" ]] && echo "CREATE USER IF NOT EXISTS '$DB_USER'@'127.0.0.1' IDENTIFIED BY '$DB_PASS'; ALTER USER '$DB_USER'@'127.0.0.1' IDENTIFIED BY '$DB_PASS'; GRANT ALL PRIVILEGES ON \`$DB_NAME\`.* TO '$DB_USER'@'127.0.0.1';" )
-FLUSH PRIVILEGES;
-SQL
-  unset MYSQL_PWD
-  H="$DB_HOST" P="$DB_PORT" U="$DB_USER" W="$DB_PASS" D="$DB_NAME" db_login_ok || die "بعد از ساخت دیتابیس هم اتصال برقرار نشد."
-  ok "دیتابیس و کاربر ساخته شد."
-fi
-
 # ───────── ۵) فایل .env ─────────
 umask 077
 cat > "$APP_DIR/.env" <<EOF
 PORT=$PORT
+DB_TYPE=$DB_TYPE
 DB_HOST=$DB_HOST
 DB_PORT=$DB_PORT
 DB_NAME=$DB_NAME
 DB_USER=$DB_USER
 DB_PASS=$DB_PASS
 ADMIN_USER=$ADMIN_USER
-GEMINI_API_KEY=${GEMINI_API_KEY:-}
 EOF
 chmod 600 "$APP_DIR/.env"
 ok "فایل .env ساخته شد (رمز ادمین در آن ذخیره نمی‌شود)."

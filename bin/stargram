@@ -27,8 +27,14 @@ cmd_status() {
   if is_active; then echo "  سرویس:        ${G}● فعال${X}"; else echo "  سرویس:        ${R}● غیرفعال${X}"; fi
   if is_enabled; then echo "  اجرای خودکار: ${G}روشن${X} ${D}(بعد از ریبوت بالا می‌آید)${X}"; else echo "  اجرای خودکار: ${Y}خاموش${X}"; fi
   echo "  پورت:         $p"
-  echo "  آدرس:         http://${ip:-SERVER_IP}:$p"
-  echo "  دیتابیس:      $(env_get DB_USER)@$(env_get DB_HOST):$(env_get DB_PORT)/$(env_get DB_NAME)"
+  local dbt; dbt="$(env_get DB_TYPE)"; dbt="${dbt:-mysql}"
+  if [[ "$dbt" == "local" ]]; then
+    echo "  دیتابیس:      ذخیره‌سازی محلی (Local Storage Engine)"
+  elif [[ "$dbt" == "postgres" || "$dbt" == "pgsql" ]]; then
+    echo "  دیتابیس:      PostgreSQL ($(env_get DB_USER)@$(env_get DB_HOST):$(env_get DB_PORT)/$(env_get DB_NAME))"
+  else
+    echo "  دیتابیس:      MySQL ($(env_get DB_USER)@$(env_get DB_HOST):$(env_get DB_PORT)/$(env_get DB_NAME))"
+  fi
   if is_active; then
     local h; h="$(health)"
     if [[ "$h" == *'"db":"connected"'* ]]; then
@@ -96,11 +102,29 @@ cmd_update() {
 cmd_backup() {
   need_root backup
   local dir="${BACKUP_DIR:-$APP_DIR/backups}" f; mkdir -p "$dir"; chmod 700 "$dir"
-  f="$dir/stargram-$(date +%F-%H%M).sql.gz"
-  local dump; dump="$(command -v mariadb-dump || command -v mysqldump || true)"
-  [[ -n "$dump" ]] || { echo "${R}mysqldump/mariadb-dump نصب نیست.${X}"; return 1; }
-  MYSQL_PWD="$(env_get DB_PASS)" "$dump" -h "$(env_get DB_HOST)" -P "$(env_get DB_PORT)" -u "$(env_get DB_USER)" --single-transaction "$(env_get DB_NAME)" | gzip > "$f" \
-    && echo "${G}✔ پشتیبان ساخته شد:${X} $f" || { echo "${R}✘ پشتیبان‌گیری ناموفق بود.${X}"; rm -f "$f"; return 1; }
+  local dbt; dbt="$(env_get DB_TYPE)"; dbt="${dbt:-mysql}"
+
+  if [[ "$dbt" == "local" ]]; then
+    f="$dir/stargram-local-$(date +%F-%H%M).json.gz"
+    if [[ -f "$APP_DIR/data/stargram_db.json" ]]; then
+      gzip -c "$APP_DIR/data/stargram_db.json" > "$f" \
+        && echo "${G}✔ پشتیبان دیتابیس محلی ساخته شد:${X} $f" || { echo "${R}✘ پشتیبان‌گیری ناموفق بود.${X}"; rm -f "$f"; return 1; }
+    else
+      echo "${Y}دیتابیس محلی هنوز رکوردی ندارد.${X}"
+    fi
+  elif [[ "$dbt" == "postgres" || "$dbt" == "pgsql" ]]; then
+    f="$dir/stargram-pg-$(date +%F-%H%M).sql.gz"
+    local pgdump; pgdump="$(command -v pg_dump || true)"
+    [[ -n "$pgdump" ]] || { echo "${R}pg_dump نصب نیست.${X}"; return 1; }
+    PGPASSWORD="$(env_get DB_PASS)" "$pgdump" -h "$(env_get DB_HOST)" -p "$(env_get DB_PORT)" -U "$(env_get DB_USER)" -d "$(env_get DB_NAME)" | gzip > "$f" \
+      && echo "${G}✔ پشتیبان PostgreSQL ساخته شد:${X} $f" || { echo "${R}✘ پشتیبان‌گیری ناموفق بود.${X}"; rm -f "$f"; return 1; }
+  else
+    f="$dir/stargram-$(date +%F-%H%M).sql.gz"
+    local dump; dump="$(command -v mariadb-dump || command -v mysqldump || true)"
+    [[ -n "$dump" ]] || { echo "${R}mysqldump/mariadb-dump نصب نیست.${X}"; return 1; }
+    MYSQL_PWD="$(env_get DB_PASS)" "$dump" -h "$(env_get DB_HOST)" -P "$(env_get DB_PORT)" -u "$(env_get DB_USER)" --single-transaction "$(env_get DB_NAME)" | gzip > "$f" \
+      && echo "${G}✔ پشتیبان ساخته شد:${X} $f" || { echo "${R}✘ پشتیبان‌گیری ناموفق بود.${X}"; rm -f "$f"; return 1; }
+  fi
 }
 
 cmd_admin() {

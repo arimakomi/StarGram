@@ -3,13 +3,14 @@ import { User, Chat, MessageReport, SystemConfig } from '../types';
 import { 
   X, Shield, Sliders, Users, Flag, MessageSquare, AlertTriangle, 
   Check, Ban, UserCheck, Key, ShieldOff, Trash2, Lock, Unlock, 
-  Search, RefreshCw, Clock, Filter, Eye, Power,
-  Database, Download, Upload, HardDrive, FileJson, RotateCcw, CheckCircle2
+  Search, RefreshCw, Clock, Filter, Eye, EyeOff, Power,
+  Database, Download, Upload, HardDrive, FileJson, RotateCcw, CheckCircle2,
+  Bot, Sparkles, Globe
 } from 'lucide-react';
 import { 
   collection, getDocs, doc, setDoc, updateDoc, deleteDoc, db,
   getAllDatabaseCollectionsData, restoreAllDatabaseCollectionsData, getRawCollectionStore
-} from '../services/firebase';
+} from '../services/database';
 
 interface AdminPanelModalProps {
   currentUser: User;
@@ -31,6 +32,18 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
   // System Config state
   const [cfg, setCfg] = useState<SystemConfig>(systemConfig);
   const [isSavingCfg, setIsSavingCfg] = useState(false);
+
+  // Gemini AI & Proxy State
+  const [geminiEnabled, setGeminiEnabled] = useState<boolean>(systemConfig.geminiEnabled ?? false);
+  const [geminiApiKey, setGeminiApiKey] = useState<string>(systemConfig.geminiApiKey || '');
+  const [geminiProxyUrl, setGeminiProxyUrl] = useState<string>(systemConfig.geminiProxyUrl || '');
+  const [geminiModel, setGeminiModel] = useState<string>(systemConfig.geminiModel || 'gemini-2.5-flash');
+  const [showApiKey, setShowApiKey] = useState(false);
+  const [isTestingAi, setIsTestingAi] = useState(false);
+  const [aiTestResult, setAiTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [isSavingAi, setIsSavingAi] = useState(false);
+  const [aiSaveSuccess, setAiSaveSuccess] = useState(false);
+  const [serverDbType, setServerDbType] = useState<string>('local');
 
   // Reports state
   const [reports, setReports] = useState<MessageReport[]>([]);
@@ -72,10 +85,66 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
   };
 
   useEffect(() => {
+    fetch('/api/health')
+      .then(res => res.json())
+      .then(d => { if (d.dbType) setServerDbType(d.dbType); })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
     if (activeTab === 'database') {
       refreshDbStore();
     }
   }, [activeTab, selectedDbCollection]);
+
+  const handleSaveAiSettings = async () => {
+    setIsSavingAi(true);
+    setAiSaveSuccess(false);
+    try {
+      await onUpdateSystemConfig({
+        geminiEnabled,
+        geminiApiKey: geminiApiKey.trim(),
+        geminiProxyUrl: geminiProxyUrl.trim(),
+        geminiModel
+      });
+      setAiSaveSuccess(true);
+      setTimeout(() => setAiSaveSuccess(false), 3500);
+    } catch (e) {
+      console.error('Error saving AI settings:', e);
+    } finally {
+      setIsSavingAi(false);
+    }
+  };
+
+  const handleTestAiConnection = async () => {
+    setIsTestingAi(true);
+    setAiTestResult(null);
+    try {
+      const token = localStorage.getItem('stargram_token');
+      const res = await fetch('/api/ai/test', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify({
+          apiKey: geminiApiKey.trim(),
+          proxyUrl: geminiProxyUrl.trim(),
+          model: geminiModel
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setAiTestResult({ success: true, message: data.message || 'اتصال موفقیت‌آمیز بود!' });
+      } else {
+        setAiTestResult({ success: false, message: data.message || 'خطا در اتصال به سرور جمنای/پروکسی' });
+      }
+    } catch (e: any) {
+      setAiTestResult({ success: false, message: e.message || 'خطای شبکه در تست اتصال' });
+    } finally {
+      setIsTestingAi(false);
+    }
+  };
 
   // Load Reports
   const loadReports = async () => {
@@ -560,6 +629,151 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
               </div>
             </div>
 
+            {/* Gemini AI & Proxy Settings Card */}
+            <div className="bg-[#0e1621] border border-[#242f3d] rounded-2xl p-5 space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-xl bg-linear-to-br from-[#5288c1]/20 to-purple-500/20 flex items-center justify-center text-[#5288c1]">
+                    <Bot className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-gray-200 flex items-center gap-2">
+                      دستیار هوش مصنوعی و تنظیمات جمنای (Gemini & Proxy)
+                      <span className="text-[10px] font-normal px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-300 border border-purple-500/20">
+                        کاملاً اختیاری
+                      </span>
+                    </h3>
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      برنامه بدون نیاز به این کلید کار می‌کند. در صورت نیاز به ربات هوش مصنوعی، توکن و پروکسی اختصاصی خود را وارد نمایید.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Enable / Disable Toggle */}
+                <button
+                  type="button"
+                  onClick={() => setGeminiEnabled(!geminiEnabled)}
+                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-hidden ${
+                    geminiEnabled ? 'bg-purple-500' : 'bg-gray-600'
+                  }`}
+                  title={geminiEnabled ? 'هوش مصنوعی فعال است' : 'هوش مصنوعی غیرفعال است'}
+                >
+                  <span
+                    className={`inline-block h-5 w-5 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                      geminiEnabled ? 'translate-x-0' : '-translate-x-5'
+                    }`}
+                  />
+                </button>
+              </div>
+
+              <div className="space-y-3 pt-2">
+                {/* API Key Input */}
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-gray-300 flex items-center gap-1.5">
+                    <Key className="w-3.5 h-3.5 text-[#5288c1]" />
+                    کلید اختصاصی Gemini API Key:
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showApiKey ? 'text' : 'password'}
+                      value={geminiApiKey}
+                      onChange={(e) => setGeminiApiKey(e.target.value)}
+                      placeholder="AIzaSy..."
+                      dir="ltr"
+                      className="w-full bg-[#17212b] border border-[#242f3d] rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-gray-500 focus:outline-hidden focus:border-[#5288c1] font-mono pl-10"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowApiKey(!showApiKey)}
+                      className="absolute left-2.5 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-white transition-colors"
+                    >
+                      {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-gray-400">
+                    کلید تنها روی سرور ذخیره می‌شود و در مرورگر کلاینت‌ها لو نمی‌رود.
+                  </p>
+                </div>
+
+                {/* Proxy URL Input */}
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-gray-300 flex items-center gap-1.5">
+                    <Globe className="w-3.5 h-3.5 text-emerald-400" />
+                    آدرس پروکسی واسط / Base URL (برای عبور از تحریم یا فیلترینگ):
+                  </label>
+                  <input
+                    type="text"
+                    value={geminiProxyUrl}
+                    onChange={(e) => setGeminiProxyUrl(e.target.value)}
+                    placeholder="https://generativelanguage.googleapis.com یا پروکسی اختصاصی شما"
+                    dir="ltr"
+                    className="w-full bg-[#17212b] border border-[#242f3d] rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-gray-500 focus:outline-hidden focus:border-[#5288c1] font-mono"
+                  />
+                  <p className="text-[11px] text-gray-400">
+                    اگر در سرور ایران یا محیط محدود هستید، آدرس ریورس پروکسی یا ورکر کلودفلر خود را بگذارید (خالی = پیش‌فرض گوگل).
+                  </p>
+                </div>
+
+                {/* Model Selector */}
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-gray-300 flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                    مدل هوش مصنوعی:
+                  </label>
+                  <select
+                    value={geminiModel}
+                    onChange={(e) => setGeminiModel(e.target.value)}
+                    className="w-full bg-[#17212b] border border-[#242f3d] rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-hidden focus:border-[#5288c1]"
+                  >
+                    <option value="gemini-2.5-flash">Gemini 2.5 Flash (سریع، بهینه و پیشنهادی)</option>
+                    <option value="gemini-2.5-pro">Gemini 2.5 Pro (پیشرفته با تحلیل عمیق)</option>
+                    <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
+                  </select>
+                </div>
+
+                {/* Test Feedback Notice */}
+                {aiTestResult && (
+                  <div
+                    className={`flex items-center gap-2 p-3 rounded-xl text-xs animate-in fade-in duration-200 border ${
+                      aiTestResult.success
+                        ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300'
+                        : 'bg-rose-500/15 border-rose-500/30 text-rose-300'
+                    }`}
+                  >
+                    {aiTestResult.success ? (
+                      <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
+                    ) : (
+                      <AlertTriangle className="w-4 h-4 shrink-0 text-rose-400" />
+                    )}
+                    <span>{aiTestResult.message}</span>
+                  </div>
+                )}
+
+                {/* Actions */}
+                <div className="flex items-center gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={handleTestAiConnection}
+                    disabled={isTestingAi || !geminiApiKey.trim()}
+                    className="px-4 py-2 bg-[#242f3d] hover:bg-[#2f3d4e] disabled:opacity-40 text-gray-200 rounded-xl text-xs font-semibold transition-all flex items-center gap-2"
+                  >
+                    {isTestingAi ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Globe className="w-3.5 h-3.5 text-[#5288c1]" />}
+                    {isTestingAi ? 'در حال تست اتصال…' : 'تست اتصال آنلاین'}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleSaveAiSettings}
+                    disabled={isSavingAi}
+                    className="px-5 py-2 bg-[#5288c1] hover:bg-[#4375a8] disabled:opacity-50 text-white rounded-xl text-xs font-semibold transition-all flex items-center gap-2 shadow-xs shadow-[#5288c1]/30 active:scale-95"
+                  >
+                    {isSavingAi ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                    {aiSaveSuccess ? 'ذخیره شد!' : 'ذخیره تنظیمات هوش مصنوعی'}
+                  </button>
+                </div>
+              </div>
+            </div>
+
             {/* Offline Isolation & Cryptography Badge */}
             <div className="bg-[#0e1621] border border-emerald-500/30 rounded-2xl p-5 space-y-2">
               <div className="flex items-center gap-2 text-emerald-400 font-semibold text-sm">
@@ -567,7 +781,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                 <span>وضعیت امنیتی و استقلال شبکه: ایزوله ۱۰۰٪ (Zero-External)</span>
               </div>
               <p className="text-xs text-gray-300 leading-relaxed">
-                تمام اتصالات خارجی به سرورهای ثالث قطع بوده، آواتارها با موتور داخلی SVG تولید می‌شوند و داده‌ها در دیتابیس لوکال با کلید‌های ۲۵۶ بیتی Web Crypto ذخیره می‌گردند.
+                تمام اتصالات سرورهای ثالث قطع بوده، آواتارها با موتور داخلی SVG تولید می‌شوند و داده‌ها در دیتابیس لوکال با کلید‌های ۲۵۶ بیتی Web Crypto ذخیره می‌گردند.
               </p>
             </div>
           </div>
@@ -946,6 +1160,20 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                 <span>{dbErrorNotice}</span>
               </div>
             )}
+
+            {/* Active Database Engine Badge */}
+            <div className="flex items-center justify-between p-3.5 bg-[#0e1621] border border-[#242f3d] rounded-xl text-xs">
+              <div className="flex items-center gap-2.5">
+                <div className={`w-2.5 h-2.5 rounded-full ${serverDbType === 'postgres' ? 'bg-sky-400' : serverDbType === 'mysql' ? 'bg-amber-400' : 'bg-emerald-400'}`} />
+                <span className="text-gray-400 font-medium">موتور فعال پایگاه‌داده:</span>
+                <span className="font-bold text-white font-mono uppercase tracking-wide">
+                  {serverDbType === 'postgres' ? 'PostgreSQL (pg)' : serverDbType === 'mysql' ? 'MySQL / MariaDB' : 'Local Storage Engine (JSON)'}
+                </span>
+              </div>
+              <span className="text-[11px] text-gray-400">
+                پشتیبانی کامل از هر دو پایگاه داده رابطه‌ای (Dual-SQL) و حافظه محلی
+              </span>
+            </div>
 
             {/* Metrics Overview Cards */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">

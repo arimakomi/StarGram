@@ -12,7 +12,7 @@ import { AdminPanelModal } from './components/AdminPanelModal';
 import { generateLocalAvatarSvg } from './services/avatarGenerator';
 import { gemini } from './services/geminiService';
 import { Lock } from 'lucide-react';
-import { db, collection, query, where, onSnapshot, doc, updateDoc, setDoc, getDoc, getDocs, deleteDoc, arrayUnion, startSync, stopSync } from './services/firebase';
+import { db, collection, query, where, onSnapshot, doc, updateDoc, setDoc, getDoc, getDocs, deleteDoc, arrayUnion, startSync, stopSync } from './services/database';
 import { authApi, getToken } from './services/auth';
 
 const AI_BOT: User = {

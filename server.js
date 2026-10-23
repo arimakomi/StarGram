@@ -1,4 +1,4 @@
-// StarGram server — Express + MySQL/MariaDB
+// StarGram server — Express + PostgreSQL / MySQL / Local Storage
 // اجرا:  node server.js          (سرویس)
 //        node server.js --init   (ساخت جدول‌ها + ساخت/ریست ادمین و خروج)
 import express from 'express';
@@ -6,6 +6,7 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import mysql from 'mysql2/promise';
+import pg from 'pg';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -25,20 +26,11 @@ if (fs.existsSync(envFile)) {
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const DIST_DIR = path.join(__dirname, 'dist');
+const DATA_DIR = path.join(__dirname, 'data');
+const LOCAL_DB_FILE = path.join(DATA_DIR, 'stargram_db.json');
 const INIT_ONLY = process.argv.includes('--init');
 const SESSION_TTL = 30 * 24 * 3600 * 1000;
 const PROTECTED_USER_FIELDS = ['role', 'isBanned', 'bannedUntil', 'banReason'];
-
-const pool = mysql.createPool({
-  host: process.env.DB_HOST || '127.0.0.1',
-  port: parseInt(process.env.DB_PORT || '3306', 10),
-  user: process.env.DB_USER || 'stargram',
-  password: process.env.DB_PASS || '',
-  database: process.env.DB_NAME || 'stargram',
-  waitForConnections: true,
-  connectionLimit: 10,
-  charset: 'utf8mb4'
-});
 
 // ───────────── رمز عبور / توکن ─────────────
 const hashPassword = (pw) => {
@@ -55,36 +47,378 @@ const verifyPassword = (pw, stored) => {
 };
 const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');
 
-// ───────────── دیتابیس ─────────────
-async function initSchema() {
-  await pool.query(`CREATE TABLE IF NOT EXISTS documents (
-    collection VARCHAR(64) NOT NULL,
-    doc_id VARCHAR(191) NOT NULL,
-    data LONGTEXT NOT NULL,
-    updated_at BIGINT NOT NULL,
-    deleted TINYINT(1) NOT NULL DEFAULT 0,
-    PRIMARY KEY (collection, doc_id),
-    KEY idx_updated (collection, updated_at)
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin`);
-  await pool.query(`CREATE TABLE IF NOT EXISTS sessions (
-    token_hash CHAR(64) NOT NULL PRIMARY KEY,
-    user_id VARCHAR(191) NOT NULL,
-    created_at BIGINT NOT NULL,
-    expires_at BIGINT NOT NULL,
-    KEY idx_user (user_id)
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin`);
+// ───────────── لایه تجرید دیتابیس (PostgreSQL / MySQL / Local) ─────────────
+let dbAdapter = null;
+
+class LocalAdapter {
+  constructor() {
+    this.type = 'local';
+    this.docs = new Map(); // key: `${col}::${id}` -> { collection, doc_id, data, updated_at, deleted }
+    this.sessions = new Map(); // token_hash -> { token_hash, user_id, created_at, expires_at }
+    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+    this.load();
+  }
+
+  load() {
+    if (fs.existsSync(LOCAL_DB_FILE)) {
+      try {
+        const raw = JSON.parse(fs.readFileSync(LOCAL_DB_FILE, 'utf8'));
+        if (Array.isArray(raw.docs)) {
+          for (const d of raw.docs) this.docs.set(`${d.collection}::${d.doc_id}`, d);
+        }
+        if (Array.isArray(raw.sessions)) {
+          for (const s of raw.sessions) this.sessions.set(s.token_hash, s);
+        }
+      } catch (e) {
+        console.warn('⚠️ اشکال در خواندن دیتابیس محلی؛ ساخت دیتابیس نو:', e.message);
+      }
+    }
+  }
+
+  save() {
+    try {
+      const data = {
+        docs: Array.from(this.docs.values()),
+        sessions: Array.from(this.sessions.values())
+      };
+      const tmp = `${LOCAL_DB_FILE}.tmp`;
+      fs.writeFileSync(tmp, JSON.stringify(data), 'utf8');
+      fs.renameSync(tmp, LOCAL_DB_FILE);
+    } catch (e) {
+      console.error('❌ خطا در ذخیره‌سازی دیتابیس محلی:', e);
+    }
+  }
+
+  async initSchema() {
+    return Promise.resolve();
+  }
+
+  async ping() {
+    return true;
+  }
+
+  async getDoc(col, id) {
+    const item = this.docs.get(`${col}::${id}`);
+    if (!item || item.deleted) return null;
+    return typeof item.data === 'string' ? JSON.parse(item.data) : item.data;
+  }
+
+  async putDoc(col, id, data, now) {
+    this.docs.set(`${col}::${id}`, {
+      collection: col,
+      doc_id: id,
+      data: typeof data === 'string' ? data : JSON.stringify(data),
+      updated_at: now,
+      deleted: 0
+    });
+    this.save();
+  }
+
+  async deleteDoc(col, id, now) {
+    const item = this.docs.get(`${col}::${id}`);
+    if (item) {
+      item.deleted = 1;
+      item.data = '{}';
+      item.updated_at = now;
+      this.save();
+    }
+  }
+
+  async getCollectionDocs(col, since) {
+    const rows = [];
+    for (const item of this.docs.values()) {
+      if (item.collection === col) {
+        if (since ? item.updated_at > since : item.deleted === 0) {
+          rows.push({
+            doc_id: item.doc_id,
+            data: item.data,
+            deleted: item.deleted
+          });
+        }
+      }
+    }
+    return rows;
+  }
+
+  async createSession(tokenHash, userId, now, expiresAt) {
+    this.sessions.set(tokenHash, { token_hash: tokenHash, user_id: userId, created_at: now, expires_at: expiresAt });
+    this.save();
+  }
+
+  async getSessionUser(tokenHash, now) {
+    const sess = this.sessions.get(tokenHash);
+    if (!sess || sess.expires_at <= now) return null;
+    return this.getDoc('users', sess.user_id);
+  }
+
+  async deleteSession(tokenHash) {
+    this.sessions.delete(tokenHash);
+    this.save();
+  }
+
+  async cleanExpiredSessions(now) {
+    for (const [th, s] of this.sessions.entries()) {
+      if (s.expires_at < now) this.sessions.delete(th);
+    }
+    this.save();
+  }
+
+  async close() {}
 }
 
-async function getDocRow(collection, id) {
-  const [rows] = await pool.query('SELECT data FROM documents WHERE collection=? AND doc_id=? AND deleted=0', [collection, id]);
-  return rows.length ? JSON.parse(rows[0].data) : null;
+class PostgresAdapter {
+  constructor(pool) {
+    this.type = 'postgres';
+    this.pool = pool;
+  }
+
+  async ping() {
+    await this.pool.query('SELECT 1');
+    return true;
+  }
+
+  async initSchema() {
+    await this.pool.query(`
+      CREATE TABLE IF NOT EXISTS documents (
+        collection VARCHAR(64) NOT NULL,
+        doc_id VARCHAR(191) NOT NULL,
+        data TEXT NOT NULL,
+        updated_at BIGINT NOT NULL,
+        deleted SMALLINT NOT NULL DEFAULT 0,
+        PRIMARY KEY (collection, doc_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_documents_updated ON documents (collection, updated_at);
+
+      CREATE TABLE IF NOT EXISTS sessions (
+        token_hash VARCHAR(64) NOT NULL PRIMARY KEY,
+        user_id VARCHAR(191) NOT NULL,
+        created_at BIGINT NOT NULL,
+        expires_at BIGINT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions (user_id);
+    `);
+  }
+
+  async getDoc(col, id) {
+    const res = await this.pool.query(
+      'SELECT data FROM documents WHERE collection = $1 AND doc_id = $2 AND deleted = 0',
+      [col, id]
+    );
+    return res.rows.length ? JSON.parse(res.rows[0].data) : null;
+  }
+
+  async putDoc(col, id, data, now) {
+    const strData = typeof data === 'string' ? data : JSON.stringify(data);
+    await this.pool.query(
+      `INSERT INTO documents (collection, doc_id, data, updated_at, deleted)
+       VALUES ($1, $2, $3, $4, 0)
+       ON CONFLICT (collection, doc_id) DO UPDATE SET
+         data = EXCLUDED.data,
+         updated_at = EXCLUDED.updated_at,
+         deleted = 0`,
+      [col, id, strData, now]
+    );
+  }
+
+  async deleteDoc(col, id, now) {
+    await this.pool.query(
+      'UPDATE documents SET deleted = 1, data = $1, updated_at = $2 WHERE collection = $3 AND doc_id = $4',
+      ['{}', now, col, id]
+    );
+  }
+
+  async getCollectionDocs(col, since) {
+    const query = since
+      ? 'SELECT doc_id, data, deleted FROM documents WHERE collection = $1 AND updated_at > $2'
+      : 'SELECT doc_id, data, deleted FROM documents WHERE collection = $1 AND deleted = 0';
+    const params = since ? [col, since] : [col];
+    const res = await this.pool.query(query, params);
+    return res.rows;
+  }
+
+  async createSession(tokenHash, userId, now, expiresAt) {
+    await this.pool.query(
+      'INSERT INTO sessions (token_hash, user_id, created_at, expires_at) VALUES ($1, $2, $3, $4)',
+      [tokenHash, userId, now, expiresAt]
+    );
+  }
+
+  async getSessionUser(tokenHash, now) {
+    const res = await this.pool.query(
+      `SELECT d.data FROM sessions s
+       JOIN documents d ON d.collection = 'users' AND d.doc_id = s.user_id AND d.deleted = 0
+       WHERE s.token_hash = $1 AND s.expires_at > $2`,
+      [tokenHash, now]
+    );
+    return res.rows.length ? JSON.parse(res.rows[0].data) : null;
+  }
+
+  async deleteSession(tokenHash) {
+    await this.pool.query('DELETE FROM sessions WHERE token_hash = $1', [tokenHash]);
+  }
+
+  async cleanExpiredSessions(now) {
+    await this.pool.query('DELETE FROM sessions WHERE expires_at < $1', [now]);
+  }
+
+  async close() {
+    await this.pool.end();
+  }
 }
-async function putDocRow(conn, collection, id, data, now) {
-  await conn.query(
-    `INSERT INTO documents (collection, doc_id, data, updated_at, deleted) VALUES (?,?,?,?,0)
-     ON DUPLICATE KEY UPDATE data=VALUES(data), updated_at=VALUES(updated_at), deleted=0`,
-    [collection, id, JSON.stringify(data), now]
-  );
+
+class MysqlAdapter {
+  constructor(pool) {
+    this.type = 'mysql';
+    this.pool = pool;
+  }
+
+  async ping() {
+    await this.pool.query('SELECT 1');
+    return true;
+  }
+
+  async initSchema() {
+    await this.pool.query(`CREATE TABLE IF NOT EXISTS documents (
+      collection VARCHAR(64) NOT NULL,
+      doc_id VARCHAR(191) NOT NULL,
+      data LONGTEXT NOT NULL,
+      updated_at BIGINT NOT NULL,
+      deleted TINYINT(1) NOT NULL DEFAULT 0,
+      PRIMARY KEY (collection, doc_id),
+      KEY idx_updated (collection, updated_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin`);
+
+    await this.pool.query(`CREATE TABLE IF NOT EXISTS sessions (
+      token_hash CHAR(64) NOT NULL PRIMARY KEY,
+      user_id VARCHAR(191) NOT NULL,
+      created_at BIGINT NOT NULL,
+      expires_at BIGINT NOT NULL,
+      KEY idx_user (user_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin`);
+  }
+
+  async getDoc(col, id) {
+    const [rows] = await this.pool.query(
+      'SELECT data FROM documents WHERE collection=? AND doc_id=? AND deleted=0',
+      [col, id]
+    );
+    return rows.length ? JSON.parse(rows[0].data) : null;
+  }
+
+  async putDoc(col, id, data, now) {
+    const strData = typeof data === 'string' ? data : JSON.stringify(data);
+    await this.pool.query(
+      `INSERT INTO documents (collection, doc_id, data, updated_at, deleted) VALUES (?,?,?,?,0)
+       ON DUPLICATE KEY UPDATE data=VALUES(data), updated_at=VALUES(updated_at), deleted=0`,
+      [col, id, strData, now]
+    );
+  }
+
+  async deleteDoc(col, id, now) {
+    await this.pool.query(
+      'UPDATE documents SET deleted=1, data=?, updated_at=? WHERE collection=? AND doc_id=?',
+      ['{}', now, col, id]
+    );
+  }
+
+  async getCollectionDocs(col, since) {
+    const query = since
+      ? 'SELECT doc_id, data, deleted FROM documents WHERE collection=? AND updated_at>?'
+      : 'SELECT doc_id, data, deleted FROM documents WHERE collection=? AND deleted=0';
+    const params = since ? [col, since] : [col];
+    const [rows] = await this.pool.query(query, params);
+    return rows;
+  }
+
+  async createSession(tokenHash, userId, now, expiresAt) {
+    await this.pool.query(
+      'INSERT INTO sessions (token_hash, user_id, created_at, expires_at) VALUES (?,?,?,?)',
+      [tokenHash, userId, now, expiresAt]
+    );
+  }
+
+  async getSessionUser(tokenHash, now) {
+    const [rows] = await this.pool.query(
+      `SELECT d.data FROM sessions s
+       JOIN documents d ON d.collection='users' AND d.doc_id=s.user_id AND d.deleted=0
+       WHERE s.token_hash=? AND s.expires_at>?`,
+      [tokenHash, now]
+    );
+    return rows.length ? JSON.parse(rows[0].data) : null;
+  }
+
+  async deleteSession(tokenHash) {
+    await this.pool.query('DELETE FROM sessions WHERE token_hash=?', [tokenHash]);
+  }
+
+  async cleanExpiredSessions(now) {
+    await this.pool.query('DELETE FROM sessions WHERE expires_at < ?', [now]);
+  }
+
+  async close() {
+    await this.pool.end();
+  }
+}
+
+// ایجاد و اتصال به دیتابیس با فال‌بک خودکار
+async function setupDatabase() {
+  const dbType = (process.env.DB_TYPE || '').toLowerCase();
+  const dbUrl = process.env.DATABASE_URL || '';
+
+  // ۱) بررسی PostgreSQL
+  if (dbType === 'postgres' || dbType === 'pgsql' || dbUrl.startsWith('postgres://') || dbUrl.startsWith('postgresql://') || process.env.PGHOST) {
+    try {
+      console.log('🔄 در حال اتصال به دیتابیس PostgreSQL…');
+      const pgConfig = dbUrl ? { connectionString: dbUrl } : {
+        host: process.env.PGHOST || process.env.DB_HOST || '127.0.0.1',
+        port: parseInt(process.env.PGPORT || process.env.DB_PORT || '5432', 10),
+        user: process.env.PGUSER || process.env.DB_USER || 'postgres',
+        password: process.env.PGPASSWORD || process.env.DB_PASS || '',
+        database: process.env.PGDATABASE || process.env.DB_NAME || 'stargram',
+        connectionTimeoutMillis: 3000
+      };
+      const pool = new pg.Pool(pgConfig);
+      const adapter = new PostgresAdapter(pool);
+      await adapter.ping();
+      await adapter.initSchema();
+      console.log('✅ با موفقیت به PostgreSQL متصل شد.');
+      return adapter;
+    } catch (e) {
+      console.warn('⚠️ اتصال به PostgreSQL ناموفق بود:', e.message);
+    }
+  }
+
+  // ۲) بررسی MySQL / MariaDB
+  if (dbType === 'mysql' || process.env.DB_HOST || dbUrl.startsWith('mysql://')) {
+    try {
+      console.log('🔄 در حال اتصال به دیتابیس MySQL / MariaDB…');
+      const mysqlConfig = dbUrl ? { uri: dbUrl } : {
+        host: process.env.DB_HOST || '127.0.0.1',
+        port: parseInt(process.env.DB_PORT || '3306', 10),
+        user: process.env.DB_USER || 'stargram',
+        password: process.env.DB_PASS || '',
+        database: process.env.DB_NAME || 'stargram',
+        waitForConnections: true,
+        connectionLimit: 10,
+        connectTimeout: 3000,
+        charset: 'utf8mb4'
+      };
+      const pool = mysql.createPool(mysqlConfig);
+      const adapter = new MysqlAdapter(pool);
+      await adapter.ping();
+      await adapter.initSchema();
+      console.log('✅ با موفقیت به MySQL / MariaDB متصل شد.');
+      return adapter;
+    } catch (e) {
+      console.warn('⚠️ اتصال به MySQL ناموفق بود:', e.message);
+    }
+  }
+
+  // ۳) فال‌بک امن به ذخیره‌سازی محلی (Local File Storage)
+  console.log('ℹ️ دیتابیس خارجی در دسترس نیست؛ اجرای برنامه با ذخیره‌سازی محلی (Local Storage).');
+  const local = new LocalAdapter();
+  await local.initSchema();
+  return local;
 }
 
 const publicUser = (u) => {
@@ -95,30 +429,36 @@ const publicUser = (u) => {
 const isAdmin = (u) => !!u && (u.role === 'superadmin' || u.role === 'admin');
 
 async function ensureAdmin({ reset }) {
-  const username = (process.env.ADMIN_USER || '').trim().toLowerCase();
-  const pass = process.env.ADMIN_PASS || '';
+  const username = (process.env.ADMIN_USER || 'admin').trim().toLowerCase();
+  const pass = process.env.ADMIN_PASS || 'admin123456';
   if (!username) return;
-  const existing = await getDocRow('users', username);
+  const existing = await dbAdapter.getDoc('users', username);
   const now = Date.now();
   if (!existing) {
-    if (!pass) { console.warn('⚠️  ADMIN_PASS تنظیم نشده؛ ادمین ساخته نشد.'); return; }
-    await putDocRow(pool, 'users', username, {
-      id: username, username, displayName: 'مدیر سیستم', passwordHash: hashPassword(pass),
+    await dbAdapter.putDoc('users', username, {
+      id: username, username, displayName: 'مدیر ارشد', passwordHash: hashPassword(pass),
       status: 'online', role: 'superadmin', phone: '', theme: 'night', wallpaper: 'default',
       contacts: [], privacy: { showStatus: 'all', showAvatar: 'all' }
     }, now);
-    console.log(`✅ ادمین «${username}» ساخته شد.`);
+    console.log(`✅ حساب مدیر «${username}» ایجاد شد.`);
   } else if (reset && pass) {
     existing.passwordHash = hashPassword(pass);
     existing.role = 'superadmin';
     existing.isBanned = false;
     delete existing.password;
-    await putDocRow(pool, 'users', username, existing, now);
-    console.log(`✅ رمز و نقش ادمین «${username}» به‌روزرسانی شد.`);
+    await dbAdapter.putDoc('users', username, existing, now);
+    console.log(`✅ رمز و نقش مدیر «${username}» به‌روزرسانی شد.`);
   }
-  if (!(await getDocRow('system_config', 'main'))) {
-    await putDocRow(pool, 'system_config', 'main', {
-      id: 'main', allowGroupCreation: true, allowChannelCreation: true, allowStories: true
+  if (!(await dbAdapter.getDoc('system_config', 'main'))) {
+    await dbAdapter.putDoc('system_config', 'main', {
+      id: 'main',
+      allowGroupCreation: true,
+      allowChannelCreation: true,
+      allowStories: true,
+      geminiEnabled: false,
+      geminiApiKey: '',
+      geminiProxyUrl: '',
+      geminiModel: 'gemini-2.5-flash'
     }, now);
   }
 }
@@ -135,7 +475,7 @@ const noteFail = (key) => {
   else a.count++;
 };
 
-// ───────────── اپ ─────────────
+// ───────────── اپ Express ─────────────
 const app = express();
 app.disable('x-powered-by');
 app.set('trust proxy', 'loopback');
@@ -153,16 +493,22 @@ const wrap = (fn) => (req, res) => fn(req, res).catch((e) => {
 });
 
 app.get('/api/health', wrap(async (req, res) => {
-  await pool.query('SELECT 1');
-  res.json({ status: 'ok', app: 'StarGram', db: 'connected', uptime: Math.round(process.uptime()), timestamp: Date.now() });
+  await dbAdapter.ping();
+  res.json({
+    status: 'ok',
+    app: 'StarGram',
+    db: 'connected',
+    dbType: dbAdapter.type,
+    uptime: Math.round(process.uptime()),
+    timestamp: Date.now()
+  });
 }));
 
 async function createSession(userId) {
   const token = crypto.randomBytes(32).toString('hex');
   const now = Date.now();
-  await pool.query('INSERT INTO sessions (token_hash,user_id,created_at,expires_at) VALUES (?,?,?,?)',
-    [sha256(token), userId, now, now + SESSION_TTL]);
-  if (Math.random() < 0.05) pool.query('DELETE FROM sessions WHERE expires_at < ?', [now]).catch(() => {});
+  await dbAdapter.createSession(sha256(token), userId, now, now + SESSION_TTL);
+  if (Math.random() < 0.05) dbAdapter.cleanExpiredSessions(now).catch(() => {});
   return token;
 }
 
@@ -172,7 +518,7 @@ const validUsername = (u) => /^[^\s/\\]{3,32}$/.test(u);
 app.get('/api/auth/exists', wrap(async (req, res) => {
   const u = normUser(req.query.username);
   if (!validUsername(u)) return res.json({ exists: false });
-  res.json({ exists: !!(await getDocRow('users', u)) });
+  res.json({ exists: !!(await dbAdapter.getDoc('users', u)) });
 }));
 
 app.post('/api/auth/register', wrap(async (req, res) => {
@@ -181,14 +527,14 @@ app.post('/api/auth/register', wrap(async (req, res) => {
   const displayName = String(req.body?.displayName || username).trim().slice(0, 60);
   if (!validUsername(username)) return res.status(400).json({ success: false, message: 'نام کاربری نامعتبر است (۳ تا ۳۲ کاراکتر بدون فاصله).' });
   if (password.length < 6) return res.status(400).json({ success: false, message: 'رمز عبور باید حداقل ۶ کاراکتر باشد.' });
-  if (await getDocRow('users', username)) return res.status(409).json({ success: false, message: 'این نام کاربری قبلاً ثبت شده است.' });
+  if (await dbAdapter.getDoc('users', username)) return res.status(409).json({ success: false, message: 'این نام کاربری قبلاً ثبت شده است.' });
   const user = {
     id: username, username, displayName, passwordHash: hashPassword(password),
     avatar: typeof req.body?.avatar === 'string' && req.body.avatar.length < 20000 ? req.body.avatar : undefined,
-    status: 'online', role: 'user', phone: `+98 912 ${Math.floor(1000000 + Math.random() * 9000000)}`,
+    status: 'online', role: 'user', phone: '',
     theme: 'night', wallpaper: 'default', contacts: [], privacy: { showStatus: 'all', showAvatar: 'all' }
   };
-  await putDocRow(pool, 'users', username, user, Date.now());
+  await dbAdapter.putDoc('users', username, user, Date.now());
   res.json({ success: true, token: await createSession(username), user: publicUser(user) });
 }));
 
@@ -197,7 +543,7 @@ app.post('/api/auth/login', wrap(async (req, res) => {
   const password = String(req.body?.password || '');
   const key = `${req.ip}|${username}`;
   if (tooMany(key)) return res.status(429).json({ success: false, message: 'تلاش‌های زیاد؛ چند دقیقه بعد دوباره امتحان کنید.' });
-  const user = validUsername(username) ? await getDocRow('users', username) : null;
+  const user = validUsername(username) ? await dbAdapter.getDoc('users', username) : null;
   if (!user || !verifyPassword(password, user.passwordHash)) {
     noteFail(key);
     return res.status(401).json({ success: false, message: 'نام کاربری یا رمز عبور اشتباه است.' });
@@ -205,7 +551,7 @@ app.post('/api/auth/login', wrap(async (req, res) => {
   if (user.isBanned) {
     if (user.bannedUntil && user.bannedUntil < Date.now()) {
       user.isBanned = false; delete user.bannedUntil; delete user.banReason;
-      await putDocRow(pool, 'users', username, user, Date.now());
+      await dbAdapter.putDoc('users', username, user, Date.now());
     } else {
       return res.status(403).json({ success: false, message: user.banReason ? `حساب شما مسدود شده است: ${user.banReason}` : 'حساب شما مسدود شده است.' });
     }
@@ -220,22 +566,23 @@ async function auth(req, res, next) {
     const h = req.headers.authorization || '';
     const token = h.startsWith('Bearer ') ? h.slice(7) : '';
     if (!token) return res.status(401).json({ success: false, message: 'نیاز به ورود' });
-    const [rows] = await pool.query(
-      `SELECT d.data FROM sessions s JOIN documents d ON d.collection='users' AND d.doc_id=s.user_id AND d.deleted=0
-       WHERE s.token_hash=? AND s.expires_at>?`, [sha256(token), Date.now()]);
-    if (!rows.length) return res.status(401).json({ success: false, message: 'نشست منقضی شده است' });
-    const user = JSON.parse(rows[0].data);
+    const user = await dbAdapter.getSessionUser(sha256(token), Date.now());
+    if (!user) return res.status(401).json({ success: false, message: 'نشست منقضی شده است' });
     if (user.isBanned && !(user.bannedUntil && user.bannedUntil < Date.now())) {
       return res.status(403).json({ success: false, message: 'حساب شما مسدود شده است.' });
     }
-    req.user = user; req.tokenHash = sha256(token);
+    req.user = user;
+    req.tokenHash = sha256(token);
     next();
-  } catch (e) { console.error(e); res.status(500).json({ success: false, message: 'خطای داخلی سرور' }); }
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ success: false, message: 'خطای داخلی سرور' });
+  }
 }
 
 app.get('/api/auth/me', auth, (req, res) => res.json({ success: true, user: publicUser(req.user) }));
 app.post('/api/auth/logout', auth, wrap(async (req, res) => {
-  await pool.query('DELETE FROM sessions WHERE token_hash=?', [req.tokenHash]);
+  await dbAdapter.deleteSession(req.tokenHash);
   res.json({ success: true });
 }));
 
@@ -245,15 +592,13 @@ app.get('/api/db/:collection', auth, wrap(async (req, res) => {
   const c = req.params.collection;
   if (!COLLECTION_RE.test(c)) return res.status(400).json({ success: false });
   const since = parseInt(req.query.since || '0', 10) || 0;
-  const [rows] = await pool.query(
-    'SELECT doc_id, data, deleted FROM documents WHERE collection=? AND updated_at>?' + (since ? '' : ' AND deleted=0'),
-    [c, since]);
-  const docs = {}; const deleted = [];
+  const rows = await dbAdapter.getCollectionDocs(c, since);
+  const docs = {};
+  const deleted = [];
   const admin = isAdmin(req.user);
   for (const r of rows) {
     if (r.deleted) { deleted.push(r.doc_id); continue; }
-    const d = JSON.parse(r.data);
-    // حریم خصوصی: هر کاربر فقط چت‌هایی را می‌بیند که عضو آن‌هاست؛ گزارش‌ها فقط برای مدیر
+    const d = typeof r.data === 'string' ? JSON.parse(r.data) : r.data;
     if (c === 'chats' && !(Array.isArray(d.participantIds) && d.participantIds.includes(req.user.id))) continue;
     if (c === 'reports' && !admin) continue;
     docs[r.doc_id] = c === 'users' ? publicUser(d) : d;
@@ -269,52 +614,146 @@ app.post('/api/db/:collection/batch', auth, wrap(async (req, res) => {
   const upserts = req.body?.upserts && typeof req.body.upserts === 'object' ? req.body.upserts : {};
   const deletes = Array.isArray(req.body?.deletes) ? req.body.deletes : [];
   const now = Date.now();
-  const conn = await pool.getConnection();
-  try {
-    await conn.beginTransaction();
-    for (const [id, incoming] of Object.entries(upserts)) {
-      if (id.length > 191 || !incoming || typeof incoming !== 'object') continue;
-      let data = incoming;
-      if (c === 'chats') {
-        const [r] = await conn.query('SELECT data FROM documents WHERE collection=? AND doc_id=? AND deleted=0 FOR UPDATE', ['chats', id]);
-        const was = r.length ? JSON.parse(r[0].data).participantIds : null;
-        const member = (arr) => Array.isArray(arr) && arr.includes(req.user.id);
-        if (!(member(incoming.participantIds) && (!was || member(was))) && !(was && member(was))) continue;
-      }
-      if (c === 'users') {
-        const [r] = await conn.query('SELECT data FROM documents WHERE collection=? AND doc_id=? AND deleted=0 FOR UPDATE', ['users', id]);
-        const existing = r.length ? JSON.parse(r[0].data) : null;
-        data = { ...incoming };
-        const plain = typeof data.password === 'string' ? data.password : null;
-        delete data.password; delete data.passwordHash;
-        if (existing) {
-          data.passwordHash = existing.passwordHash;
-          if (plain && plain.length >= 6 && (admin || req.user.id === id)) data.passwordHash = hashPassword(plain);
-          if (!admin) {
-            for (const f of PROTECTED_USER_FIELDS) {
-              if (existing[f] === undefined) delete data[f]; else data[f] = existing[f];
-            }
+
+  for (const [id, incoming] of Object.entries(upserts)) {
+    if (id.length > 191 || !incoming || typeof incoming !== 'object') continue;
+    let data = incoming;
+    if (c === 'chats') {
+      const existingChat = await dbAdapter.getDoc('chats', id);
+      const was = existingChat ? existingChat.participantIds : null;
+      const member = (arr) => Array.isArray(arr) && arr.includes(req.user.id);
+      if (!(member(incoming.participantIds) && (!was || member(was))) && !(was && member(was))) continue;
+    }
+    if (c === 'users') {
+      const existing = await dbAdapter.getDoc('users', id);
+      data = { ...incoming };
+      const plain = typeof data.password === 'string' ? data.password : null;
+      delete data.password; delete data.passwordHash;
+      if (existing) {
+        data.passwordHash = existing.passwordHash;
+        if (plain && plain.length >= 6 && (admin || req.user.id === id)) data.passwordHash = hashPassword(plain);
+        if (!admin) {
+          for (const f of PROTECTED_USER_FIELDS) {
+            if (existing[f] === undefined) delete data[f]; else data[f] = existing[f];
           }
-        } else {
-          if (!admin) continue; // ساخت کاربر جدید فقط از مسیر /api/auth/register
-          if (plain && plain.length >= 6) data.passwordHash = hashPassword(plain);
         }
+      } else {
+        if (!admin) continue;
+        if (plain && plain.length >= 6) data.passwordHash = hashPassword(plain);
       }
-      await putDocRow(conn, c, id, data, now);
     }
-    for (const id of deletes) {
-      if (typeof id !== 'string') continue;
-      if (c === 'users' && !admin && id !== req.user.id) continue;
-      if (c === 'users' && id === req.user.id && admin) continue; // ادمین نمی‌تواند خودش را حذف کند
-      if (c === 'chats') {
-        const cur = await getDocRow('chats', id);
-        if (!cur || !(Array.isArray(cur.participantIds) && cur.participantIds.includes(req.user.id))) continue;
-      }
-      await conn.query('UPDATE documents SET deleted=1, data=?, updated_at=? WHERE collection=? AND doc_id=?', ['{}', now, c, id]);
+    await dbAdapter.putDoc(c, id, data, now);
+  }
+
+  for (const id of deletes) {
+    if (typeof id !== 'string') continue;
+    if (c === 'users' && !admin && id !== req.user.id) continue;
+    if (c === 'users' && id === req.user.id && admin) continue;
+    if (c === 'chats') {
+      const cur = await dbAdapter.getDoc('chats', id);
+      if (!cur || !(Array.isArray(cur.participantIds) && cur.participantIds.includes(req.user.id))) continue;
     }
-    await conn.commit();
-  } catch (e) { await conn.rollback(); throw e; } finally { conn.release(); }
+    await dbAdapter.deleteDoc(c, id, now);
+  }
+
   res.json({ success: true, now });
+}));
+
+// ───────────── پروکسی سرور هوش مصنوعی Gemini ─────────────
+async function getGeminiConfig() {
+  const cfg = await dbAdapter.getDoc('system_config', 'main');
+  const apiKey = (cfg?.geminiApiKey || process.env.GEMINI_API_KEY || '').trim();
+  const proxyUrl = (cfg?.geminiProxyUrl || process.env.GEMINI_PROXY_URL || '').trim().replace(/\/$/, '');
+  const model = (cfg?.geminiModel || 'gemini-2.5-flash').trim();
+  const enabled = cfg?.geminiEnabled ?? (!!apiKey);
+  return { apiKey, proxyUrl, model, enabled };
+}
+
+// تست اتصال کلید API و پروکسی جمنای (مخصوص مدیر)
+app.post('/api/ai/test', auth, wrap(async (req, res) => {
+  if (!isAdmin(req.user)) return res.status(403).json({ success: false, message: 'فقط مدیر به این بخش دسترسی دارد.' });
+  const { apiKey: customKey, proxyUrl: customProxy, model: customModel } = req.body || {};
+  const current = await getGeminiConfig();
+  const key = (customKey !== undefined ? customKey : current.apiKey).trim();
+  const proxy = (customProxy !== undefined ? customProxy : current.proxyUrl).trim().replace(/\/$/, '');
+  const model = customModel || current.model || 'gemini-2.5-flash';
+
+  if (!key) return res.status(400).json({ success: false, message: 'کلید API جمنای وارد نشده است.' });
+
+  try {
+    const baseUrl = proxy || 'https://generativelanguage.googleapis.com';
+    const targetUrl = `${baseUrl}/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`;
+    const resp = await fetch(targetUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: 'پاسخ کوتاه بده: آیا فعالی؟' }] }]
+      }),
+      signal: AbortSignal.timeout(10000)
+    });
+    if (!resp.ok) {
+      const errText = await resp.text();
+      return res.status(resp.status).json({ success: false, message: `پاسخ ناموفق از سرور واسط (${resp.status}): ${errText.slice(0, 200)}` });
+    }
+    const data = await resp.json();
+    const reply = data.candidates?.[0]?.content?.parts?.[0]?.text || 'تست موفقیت‌آمیز بود!';
+    res.json({ success: true, message: 'اتصال با موفقیت برقرار شد!', reply });
+  } catch (e) {
+    res.status(500).json({ success: false, message: `خطا در اتصال به پروکسی/جمنای: ${e.message}` });
+  }
+}));
+
+// گفتگوی هوش مصنوعی برای کاربران (بدون افشای کلید در فرانت‌اند)
+app.post('/api/ai/chat', auth, wrap(async (req, res) => {
+  const { prompt, history } = req.body || {};
+  if (!prompt || typeof prompt !== 'string') return res.status(400).json({ success: false, message: 'متن پیام ارسال نشده است.' });
+
+  const { apiKey, proxyUrl, model, enabled } = await getGeminiConfig();
+  if (!enabled || !apiKey) {
+    return res.status(400).json({
+      success: false,
+      message: 'دستیار هوش مصنوعی در حال حاضر غیرفعال است یا توسط مدیر در پنل ادمین تنظیم نشده است.'
+    });
+  }
+
+  const baseUrl = proxyUrl || 'https://generativelanguage.googleapis.com';
+  const targetUrl = `${baseUrl}/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
+
+  const formattedContents = [
+    ...(Array.isArray(history) ? history.map(h => ({
+      role: h.role === 'model' ? 'model' : 'user',
+      parts: [{ text: String(h.text || '') }]
+    })) : []),
+    { role: 'user', parts: [{ text: prompt }] }
+  ];
+
+  try {
+    const resp = await fetch(targetUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: formattedContents,
+        systemInstruction: {
+          parts: [{ text: 'You are a helpful, friendly AI assistant in StarGram. Respond in Persian. Keep it conversational and brief. Use emojis.' }]
+        },
+        generationConfig: { temperature: 0.8 }
+      }),
+      signal: AbortSignal.timeout(20000)
+    });
+
+    if (!resp.ok) {
+      const errText = await resp.text();
+      console.error('Gemini API Error:', resp.status, errText);
+      return res.status(resp.status).json({ success: false, message: 'خطا در دریافت پاسخ از هوش مصنوعی.' });
+    }
+
+    const data = await resp.json();
+    const reply = data.candidates?.[0]?.content?.parts?.[0]?.text || 'پاسخی دریافت نشد.';
+    res.json({ success: true, reply });
+  } catch (e) {
+    console.error('AI Proxy Error:', e);
+    res.status(500).json({ success: false, message: `خطا در ارتباط با سرور هوش مصنوعی: ${e.message}` });
+  }
 }));
 
 // فایل‌های استاتیک
@@ -327,16 +766,20 @@ app.use((req, res) => {
   res.status(503).send('پوشه dist یافت نشد. ابتدا دستور npm run build را اجرا کنید.');
 });
 
-// ───────────── راه‌اندازی ─────────────
+// ───────────── راه‌اندازی سرور ─────────────
 try {
-  await initSchema();
+  dbAdapter = await setupDatabase();
   await ensureAdmin({ reset: INIT_ONLY });
 } catch (e) {
-  console.error('❌ اتصال/آماده‌سازی دیتابیس ناموفق بود:', e.message);
+  console.error('❌ آماده‌سازی سرور با خطا مواجه شد:', e.message);
   process.exit(1);
 }
-if (INIT_ONLY) { await pool.end(); process.exit(0); }
+
+if (INIT_ONLY) {
+  await dbAdapter.close();
+  process.exit(0);
+}
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 StarGram روی پورت ${PORT} فعال شد — http://localhost:${PORT}`);
+  console.log(`🚀 StarGram با دیتابیس [${dbAdapter.type}] روی پورت ${PORT} فعال شد — http://localhost:${PORT}`);
 });

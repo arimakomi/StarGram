@@ -141,4 +141,8 @@ export interface SystemConfig {
   allowGroupCreation: boolean;
   allowChannelCreation: boolean;
   allowStories: boolean;
+  geminiEnabled?: boolean;
+  geminiApiKey?: string;
+  geminiProxyUrl?: string;
+  geminiModel?: string;
 }

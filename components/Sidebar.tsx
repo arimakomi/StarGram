@@ -7,7 +7,7 @@ import {
   Archive, ArchiveRestore, CheckCheck, RotateCcw, ChevronDown, ChevronUp,
   Shield, User as UserIcon, Sparkles, Heart
 } from 'lucide-react';
-import { collection, query, where, getDocs, db } from '../services/firebase';
+import { collection, query, where, getDocs, db } from '../services/database';
 import { compressImage } from '../services/imageUtils';
 import { StoriesBar } from './StoriesBar';
 
