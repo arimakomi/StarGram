@@ -12,7 +12,8 @@ import { AdminPanelModal } from './components/AdminPanelModal';
 import { generateLocalAvatarSvg } from './services/avatarGenerator';
 import { gemini } from './services/geminiService';
 import { Lock } from 'lucide-react';
-import { db, collection, query, where, onSnapshot, doc, updateDoc, setDoc, getDoc, getDocs, deleteDoc, arrayUnion } from './services/firebase';
+import { db, collection, query, where, onSnapshot, doc, updateDoc, setDoc, getDoc, getDocs, deleteDoc, arrayUnion, startSync, stopSync } from './services/firebase';
+import { authApi, getToken } from './services/auth';
 
 const AI_BOT: User = {
   id: 'ai-assistant',
@@ -56,21 +57,31 @@ const App: React.FC = () => {
   const [isAppLocked, setIsAppLocked] = useState(false);
   const [lockInput, setLockInput] = useState('');
 
-  // 1. Load User Session
+  // 1. Load User Session (اعتبارسنجی توکن روی سرور و دریافت داده‌ها از دیتابیس)
+  const [booting, setBooting] = useState(true);
   useEffect(() => {
-    const savedSession = localStorage.getItem('starly_session_cloud');
-    if (savedSession) {
+    (async () => {
       try {
-        const user = JSON.parse(savedSession);
-        if (!user.avatar || user.avatar.includes('http://') || user.avatar.includes('https://')) {
-          user.avatar = generateLocalAvatarSvg(user.displayName || user.username, user.id);
-          localStorage.setItem('starly_session_cloud', JSON.stringify(user));
+        if (getToken()) {
+          const r = await authApi.me();
+          if (r.success && r.user) {
+            const user = r.user;
+            if (!user.avatar || user.avatar.includes('http://') || user.avatar.includes('https://')) {
+              user.avatar = generateLocalAvatarSvg(user.displayName || user.username, user.id);
+            }
+            await startSync();
+            localStorage.setItem('starly_session_cloud', JSON.stringify(user));
+            setCurrentUser(user);
+            document.body.className = `${user.theme || 'night'}-theme`;
+            if (user.passcode) setIsAppLocked(true);
+          } else if (r.status === 401 || r.status === 403) {
+            localStorage.removeItem('starly_session_cloud');
+            await authApi.logout();
+          }
         }
-        setCurrentUser(user);
-        document.body.className = `${user.theme || 'night'}-theme`;
-        if (user.passcode) setIsAppLocked(true);
       } catch (e) { console.error(e); }
-    }
+      finally { setBooting(false); }
+    })();
   }, []);
 
   // 2. Real-time Chats Sync
@@ -119,7 +130,8 @@ const App: React.FC = () => {
     return () => unsubscribe();
   }, []);
 
-  const handleAuth = (user: User) => {
+  const handleAuth = async (user: User) => {
+    await startSync();
     setCurrentUser(user);
     document.body.className = `${user.theme}-theme`;
   };
@@ -503,6 +515,7 @@ const App: React.FC = () => {
     return chats.find(c => c.id === activeChatId) || null;
   };
 
+  if (booting) return <div className="min-h-screen bg-[#0e1621] flex items-center justify-center text-[#8b98a5] font-['Vazirmatn']" dir="rtl">در حال بارگذاری…</div>;
   if (!currentUser) return <Login onLogin={handleAuth} />;
 
   // Lock Screen (UI Only - Same as before)
@@ -530,7 +543,7 @@ const App: React.FC = () => {
 
   const handleToggleContact = async (contactUser: User) => {
     if (!currentUser) return;
-    const currentContacts = currentUser.contacts || ['u_support', 'u_ali', 'u_sara'];
+    const currentContacts = currentUser.contacts || [];
     const isContact = currentContacts.includes(contactUser.id);
     const updatedContacts = isContact
       ? currentContacts.filter(id => id !== contactUser.id)
@@ -562,7 +575,7 @@ const App: React.FC = () => {
             onOpenMyProfile={() => setShowMyProfile(true)}
             onOpenAdminPanel={() => setShowAdminPanel(true)}
             onOpenSettings={() => setShowSettings(true)}
-            onLogout={() => { localStorage.removeItem('starly_session_cloud'); setCurrentUser(null); }}
+            onLogout={async () => { localStorage.removeItem('starly_session_cloud'); await authApi.logout(); stopSync(); setCurrentUser(null); }}
             onToggleContact={handleToggleContact}
             onOpenSavedMessages={handleOpenSavedMessages}
             onPinChat={handlePinChat}

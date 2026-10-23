@@ -200,6 +200,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
 
   const handleResetPassword = async () => {
     if (!selectedUserForAction || !newPasswordInput.trim()) return;
+    if (newPasswordInput.trim().length < 6) { alert('رمز عبور باید حداقل ۶ کاراکتر باشد.'); return; }
     try {
       await updateDoc(doc(db, 'users', selectedUserForAction.id), {
         password: newPasswordInput.trim()

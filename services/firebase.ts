@@ -1,5 +1,4 @@
-import { DEFAULT_AVATAR } from '../types';
-import { generateLocalAvatarSvg } from './avatarGenerator';
+import { getToken } from './auth';
 
 export interface DocumentReference<T = any> {
   id: string;
@@ -40,11 +39,6 @@ export const db = {
   version: 1
 };
 
-// Broadcast channel for multi-tab synchronization
-const channel = typeof window !== 'undefined' && 'BroadcastChannel' in window 
-  ? new BroadcastChannel('starly_chat_sync_channel')
-  : null;
-
 // In-memory active listeners
 type SnapshotCallback = (snapshot: any) => void;
 const listeners = new Map<string, Set<{ target: Query | DocumentReference; callback: SnapshotCallback }>>();
@@ -70,303 +64,128 @@ function notifyCollectionListeners(collectionName: string) {
   });
 }
 
-// Listen to other browser tabs
-if (channel) {
-  channel.onmessage = (event) => {
-    if (event.data?.type === 'SYNC_COLLECTION' && event.data?.collectionName) {
-      notifyCollectionListeners(event.data.collectionName);
-    }
-  };
+// ───────────── ذخیره‌سازی: حافظه محلی + همگام‌سازی با دیتابیس سرور ─────────────
+const memoryStore = new Map<string, Record<string, any>>();
+const SYNC_COLLECTIONS = ['users', 'chats', 'stories', 'system_config', 'reports'];
+const POLL_MS = 2500;
+
+// آخرین نسخه‌ی همگام‌شده با سرور (JSON هر سند) برای تشخیص تغییرات
+const synced = new Map<string, Record<string, string>>();
+const sinceMap = new Map<string, number>();
+const pushTimers = new Map<string, any>();
+let pollTimer: any = null;
+let syncActive = false;
+
+function getCollectionStore(collectionName: string): Record<string, any> {
+  let s = memoryStore.get(collectionName);
+  if (!s) { s = {}; memoryStore.set(collectionName, s); }
+  return s;
 }
 
-// In-memory cache for ultra-fast access and quota fallback
-const memoryStore = new Map<string, Record<string, any>>();
-
-// LocalStorage helpers
-function getCollectionStore(collectionName: string): Record<string, any> {
-  if (memoryStore.has(collectionName)) {
-    return memoryStore.get(collectionName)!;
-  }
-  if (typeof window === 'undefined') return {};
-  try {
-    const raw = localStorage.getItem(`starly_db_${collectionName}`);
-    if (!raw) {
-      memoryStore.set(collectionName, {});
-      return {};
-    }
-    const parsed = JSON.parse(raw);
-    memoryStore.set(collectionName, parsed);
-    return parsed;
-  } catch (e) {
-    console.error(`Error parsing collection ${collectionName}:`, e);
-    const fallback = {};
-    memoryStore.set(collectionName, fallback);
-    return fallback;
-  }
+function emitChange(collectionName: string, _broadcast: boolean) {
+  notifyCollectionListeners(collectionName);
 }
 
 function setCollectionStore(collectionName: string, data: Record<string, any>) {
-  // Always update memory store first so the app works instantaneously without lag
   memoryStore.set(collectionName, data);
+  emitChange(collectionName, true);
+  schedulePush(collectionName);
+}
 
-  if (typeof window !== 'undefined') {
-    try {
-      localStorage.setItem(`starly_db_${collectionName}`, JSON.stringify(data));
-    } catch (e) {
-      console.warn(`Storage quota exceeded for ${collectionName}. Data preserved in memory.`, e);
-      // Attempt safe optimization if quota exceeded: remove heavy audio/base64 from older items
-      try {
-        const lightweightCopy: Record<string, any> = {};
-        for (const [k, v] of Object.entries(data)) {
-          if (v && v.messages && Array.isArray(v.messages)) {
-            // Keep recent 30 messages in localStorage to fit within limits
-            lightweightCopy[k] = {
-              ...v,
-              messages: v.messages.slice(-30)
-            };
-          } else {
-            lightweightCopy[k] = v;
-          }
-        }
-        localStorage.setItem(`starly_db_${collectionName}`, JSON.stringify(lightweightCopy));
-      } catch (err) {
-        // Safe silent fallback - memoryStore holds the true state
-      }
-    }
-    notifyCollectionListeners(collectionName);
-    channel?.postMessage({ type: 'SYNC_COLLECTION', collectionName });
+async function api(path: string, init?: RequestInit) {
+  const token = getToken();
+  const res = await fetch(path, {
+    ...init,
+    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) }
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+function schedulePush(collectionName: string) {
+  if (!syncActive) return;
+  clearTimeout(pushTimers.get(collectionName));
+  pushTimers.set(collectionName, setTimeout(() => pushCollection(collectionName), 250));
+}
+
+async function pushCollection(collectionName: string) {
+  if (!syncActive) return;
+  const store = getCollectionStore(collectionName);
+  const base = synced.get(collectionName) || {};
+  const upserts: Record<string, any> = {};
+  const nextSynced: Record<string, string> = { ...base };
+  for (const [id, d] of Object.entries(store)) {
+    const j = JSON.stringify(d);
+    if (base[id] !== j) { upserts[id] = d; nextSynced[id] = j; }
+  }
+  const deletes = Object.keys(base).filter(id => !(id in store));
+  deletes.forEach(id => delete nextSynced[id]);
+  if (!Object.keys(upserts).length && !deletes.length) return;
+  try {
+    await api(`/api/db/${collectionName}/batch`, { method: 'POST', body: JSON.stringify({ upserts, deletes }) });
+    synced.set(collectionName, nextSynced);
+  } catch (e) {
+    console.warn(`Sync push failed for ${collectionName}, retrying…`, e);
+    pushTimers.set(collectionName, setTimeout(() => pushCollection(collectionName), 4000));
   }
 }
 
-// Seed initial data if not present
-function initSeedData() {
-  if (typeof window === 'undefined') return;
-  
-  // Seed Users
-  const users = getCollectionStore('users');
-  let usersModified = false;
+async function pullCollection(collectionName: string, full: boolean) {
+  const since = full ? 0 : (sinceMap.get(collectionName) || 0);
+  const r = await api(`/api/db/${collectionName}?since=${since}`);
+  const store = getCollectionStore(collectionName);
+  const base = synced.get(collectionName) || {};
+  let changed = false;
 
-  // Scrub any external URLs (ui-avatars, unsplash, etc.) from existing stored users
-  for (const k of Object.keys(users)) {
-    const u = users[k];
-    if (!u.avatar || u.avatar.includes('http://') || u.avatar.includes('https://')) {
-      u.avatar = generateLocalAvatarSvg(u.displayName || u.username, u.id);
-      usersModified = true;
-    }
-    if (k === 'support' && u.role !== 'superadmin') {
-      u.role = 'superadmin';
-      usersModified = true;
-    }
-    if (!u.phone) {
-      u.phone = k === 'support' ? '+98 912 000 0001' : `+98 912 ${Math.floor(1000000 + Math.random() * 9000000)}`;
-      usersModified = true;
+  if (full) {
+    // جایگزینی کامل، به‌جز تغییرات محلیِ هنوز ارسال‌نشده
+    for (const id of Object.keys(store)) {
+      if (!(id in r.docs) && JSON.stringify(store[id]) === base[id]) { delete store[id]; delete base[id]; changed = true; }
     }
   }
-
-  if (Object.keys(users).length === 0) {
-    const defaultUsers: Record<string, any> = {
-      'starly_ai': {
-        id: 'ai-assistant',
-        username: 'starly_ai',
-        displayName: 'هوش مصنوعی استارلی',
-        password: '123',
-        avatar: generateLocalAvatarSvg('هوش مصنوعی استارلی', 'ai-assistant'),
-        status: 'online',
-        role: 'user',
-        phone: '+98 900 111 2233',
-        bio: 'دستیار هوشمند چت استارلی با هوش مصنوعی',
-        theme: 'night',
-        wallpaper: 'default',
-        contacts: ['u_support', 'u_ali', 'u_sara'],
-        privacy: { showStatus: 'all', showAvatar: 'all' }
-      },
-      'support': {
-        id: 'u_support',
-        username: 'support',
-        displayName: 'پشتیبانی استارلی',
-        password: '123',
-        avatar: generateLocalAvatarSvg('پشتیبانی استارلی', 'u_support'),
-        status: 'online',
-        role: 'superadmin',
-        phone: '+98 912 000 0001',
-        bio: 'پشتیبانی رسمی استارلی چت',
-        theme: 'night',
-        wallpaper: 'default',
-        contacts: ['u_ali', 'u_sara'],
-        privacy: { showStatus: 'all', showAvatar: 'all' }
-      },
-      'ali': {
-        id: 'u_ali',
-        username: 'ali',
-        displayName: 'علی رضایی',
-        password: '123',
-        avatar: generateLocalAvatarSvg('علی رضایی', 'u_ali'),
-        status: 'online',
-        role: 'user',
-        phone: '+98 912 345 6789',
-        bio: 'برنامه‌نویس وب و علاقه‌مند به تکنولوژی',
-        theme: 'night',
-        wallpaper: 'default',
-        contacts: ['u_support', 'u_sara'],
-        privacy: { showStatus: 'all', showAvatar: 'all' }
-      },
-      'sara': {
-        id: 'u_sara',
-        username: 'sara',
-        displayName: 'سارا تهرانی',
-        password: '123',
-        avatar: generateLocalAvatarSvg('سارا تهرانی', 'u_sara'),
-        status: 'online',
-        role: 'user',
-        phone: '+98 935 987 6543',
-        bio: 'طراح رابط کاربری (UI/UX)',
-        theme: 'night',
-        wallpaper: 'default',
-        contacts: ['u_support', 'u_ali'],
-        privacy: { showStatus: 'all', showAvatar: 'all' }
-      }
-    };
-    setCollectionStore('users', defaultUsers);
-  } else if (usersModified) {
-    setCollectionStore('users', users);
+  for (const [id, d] of Object.entries<any>(r.docs || {})) {
+    const j = JSON.stringify(d);
+    const dirty = id in store && base[id] !== undefined && JSON.stringify(store[id]) !== base[id];
+    if (dirty) continue; // تغییر محلی در انتظار ارسال است
+    if (base[id] !== j || !(id in store)) { store[id] = d; changed = true; }
+    base[id] = j;
   }
-
-  // Seed system configuration
-  const sysConfig = getCollectionStore('system_config');
-  if (!sysConfig['main']) {
-    setCollectionStore('system_config', {
-      main: {
-        id: 'main',
-        allowGroupCreation: true,
-        allowChannelCreation: true,
-        allowStories: true
-      }
-    });
+  for (const id of r.deleted || []) {
+    const dirty = id in store && base[id] !== undefined && JSON.stringify(store[id]) !== base[id];
+    if (!dirty && id in store) { delete store[id]; changed = true; }
+    delete base[id];
   }
-
-  // Seed sample stories (100% local SVG artwork)
-  const stories = getCollectionStore('stories');
-  if (Object.keys(stories).length === 0) {
-    const sampleStorySvg = `data:image/svg+xml;utf8,${encodeURIComponent(
-      '<svg xmlns="http://www.w3.org/2000/svg" width="600" height="900" viewBox="0 0 600 900"><defs><linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#1e3c72"/><stop offset="100%" stop-color="#2a5298"/></linearGradient></defs><rect width="600" height="900" fill="url(#g)"/><circle cx="300" cy="400" r="120" fill="rgba(255,255,255,0.1)"/><text x="300" y="420" font-family="sans-serif" font-size="32" font-weight="bold" fill="#ffffff" text-anchor="middle">استارلی چت</text><text x="300" y="470" font-family="sans-serif" font-size="20" fill="rgba(255,255,255,0.8)" text-anchor="middle">سریع، امن و کاملاً آفلاین</text></svg>'
-    )}`;
-
-    setCollectionStore('stories', {
-      'story_welcome': {
-        id: 'story_welcome',
-        userId: 'u_support',
-        userName: 'پشتیبانی استارلی',
-        userAvatar: generateLocalAvatarSvg('پشتیبانی استارلی', 'u_support'),
-        mediaUrl: sampleStorySvg,
-        caption: 'نسخه ارتقا یافته استارلی با رمزنگاری سرتاسری و پنل مدیریت فعال شد! ✨',
-        timestamp: Date.now() - 3600000,
-        expiresAt: Date.now() + 86400000,
-        viewers: []
-      }
-    });
-  }
-
-  // Seed default chats (e.g. Official News Channel and Public Group)
-  const chats = getCollectionStore('chats');
-  let chatsModified = false;
-
-  // Scrub external URLs from stored chats
-  for (const cId of Object.keys(chats)) {
-    const c = chats[cId];
-    if (c.groupAvatar && (c.groupAvatar.includes('http://') || c.groupAvatar.includes('https://'))) {
-      c.groupAvatar = generateLocalAvatarSvg(c.groupName || 'گروه', c.id);
-      chatsModified = true;
-    }
-    if (Array.isArray(c.participants)) {
-      c.participants.forEach((p: any) => {
-        if (!p.avatar || p.avatar.includes('http://') || p.avatar.includes('https://')) {
-          p.avatar = generateLocalAvatarSvg(p.displayName || p.username, p.id);
-          chatsModified = true;
-        }
-      });
-    }
-  }
-
-  if (Object.keys(chats).length === 0) {
-    const newsChannelId = 'ch_starly_news';
-    const publicGroupId = 'g_starly_general';
-    const initialChats: Record<string, any> = {
-      [newsChannelId]: {
-        id: newsChannelId,
-        type: 'channel',
-        groupName: 'کانال رسمی استارلی',
-        groupAvatar: generateLocalAvatarSvg('کانال رسمی استارلی', 'news'),
-        description: 'کانال رسمی اخبار و بروزرسانی‌های پیام‌رسان استارلی',
-        adminId: 'u_support',
-        participants: [
-          { id: 'u_support', username: 'support', displayName: 'پشتیبانی استارلی', avatar: generateLocalAvatarSvg('پشتیبانی استارلی', 'u_support'), status: 'online' }
-        ],
-        participantIds: ['ai-assistant', 'u_support', 'u_ali', 'u_sara'],
-        messages: [
-          {
-            id: 'm_welcome_1',
-            senderId: 'u_support',
-            text: 'سلام به استارلی چت خوش آمدید! 🌟\nپیام‌رسان پرسرعت و مدرن با رمزنگاری سرتاسری E2EE.',
-            timestamp: Date.now() - 3600000,
-            isRead: true
-          },
-          {
-            id: 'm_welcome_2',
-            senderId: 'u_support',
-            text: 'قابلیت‌های کلیدی:\n🔒 رمزنگاری سرتاسری (E2EE) با کلید AES-256\n📱 استوری‌های سبک تلگرام با نوار اختصاصی\n🛡️ پنل مدیریت ارشد کل پیام‌رسان\n👥 گزارش پیام‌ها و مدیریت تخلفات',
-            timestamp: Date.now() - 1800000,
-            isRead: true
-          }
-        ],
-        lastMessage: {
-          id: 'm_welcome_2',
-          senderId: 'u_support',
-          text: 'قابلیت‌های کلیدی:\n🔒 رمزنگاری سرتاسری (E2EE) با کلید AES-256...',
-          timestamp: Date.now() - 1800000,
-          isRead: true
-        },
-        pinnedMessageIds: ['m_welcome_1'],
-        unreadCount: 0
-      },
-      [publicGroupId]: {
-        id: publicGroupId,
-        type: 'group',
-        groupName: 'گروه گفتگوی عمومی',
-        groupAvatar: generateLocalAvatarSvg('گروه گفتگوی عمومی', 'general'),
-        description: 'محیطی برای گفتگو و تبادل نظر کاربران استارلی',
-        adminId: 'u_support',
-        participants: [
-          { id: 'u_support', username: 'support', displayName: 'پشتیبانی استارلی', avatar: generateLocalAvatarSvg('پشتیبانی استارلی', 'u_support'), status: 'online' },
-          { id: 'u_ali', username: 'ali', displayName: 'علی رضایی', avatar: generateLocalAvatarSvg('علی رضایی', 'u_ali'), status: 'online' }
-        ],
-        participantIds: ['ai-assistant', 'u_support', 'u_ali', 'u_sara'],
-        messages: [
-          {
-            id: 'm_grp_1',
-            senderId: 'u_ali',
-            text: 'درود به همگی! سرعت و طراحی قالب تلگرام وب فوق‌العاده‌ست 👌',
-            timestamp: Date.now() - 900000,
-            isRead: true
-          }
-        ],
-        lastMessage: {
-          id: 'm_grp_1',
-          senderId: 'u_ali',
-          text: 'درود به همگی! سرعت و طراحی قالب تلگرام وب فوق‌العاده‌ست 👌',
-          timestamp: Date.now() - 900000,
-          isRead: true
-        },
-        pinnedMessageIds: [],
-        unreadCount: 0
-      }
-    };
-    setCollectionStore('chats', initialChats);
-  } else if (chatsModified) {
-    setCollectionStore('chats', chats);
-  }
+  synced.set(collectionName, base);
+  sinceMap.set(collectionName, r.now);
+  if (changed) emitChange(collectionName, false);
 }
 
-initSeedData();
+async function pollAll() {
+  if (!syncActive) return;
+  try {
+    await Promise.all(SYNC_COLLECTIONS.map(c => pullCollection(c, false)));
+  } catch (e) {
+    console.warn('Sync poll failed', e);
+  }
+  if (syncActive) pollTimer = setTimeout(pollAll, POLL_MS);
+}
+
+/** بعد از ورود صدا زده می‌شود: دریافت کامل داده‌ها از دیتابیس و شروع همگام‌سازی */
+export async function startSync(): Promise<void> {
+  stopSync();
+  memoryStore.clear(); synced.clear(); sinceMap.clear();
+  await Promise.all(SYNC_COLLECTIONS.map(c => pullCollection(c, true)));
+  syncActive = true;
+  pollTimer = setTimeout(pollAll, POLL_MS);
+}
+
+export function stopSync() {
+  syncActive = false;
+  clearTimeout(pollTimer);
+  pushTimers.forEach(t => clearTimeout(t));
+  pushTimers.clear();
+  memoryStore.clear(); synced.clear(); sinceMap.clear();
+}
 
 // Synchronous snapshot generators
 function getDocSnapshotSync<T = any>(ref: DocumentReference<T>): DocumentSnapshot<T> {

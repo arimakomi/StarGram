@@ -1311,7 +1311,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
             /* 1-on-1 PRIVATE CHAT USER PROFILE VIEW (NO MEMBERS LIST) */
             (() => {
               const otherUser = chat.participants.find(p => p.id !== currentUser.id) || chat.participants[0];
-              const isContact = (currentUser.contacts || ['u_support', 'u_ali', 'u_sara']).includes(otherUser.id);
+              const isContact = (currentUser.contacts || []).includes(otherUser.id);
               const chatPhotos = chat.messages.filter(m => !!m.imageUrl);
               const chatVoiceNotes = chat.messages.filter(m => !!m.audioUrl);
               const chatLinks = chat.messages.filter(m => m.text && (m.text.includes('http') || m.text.includes('@')));

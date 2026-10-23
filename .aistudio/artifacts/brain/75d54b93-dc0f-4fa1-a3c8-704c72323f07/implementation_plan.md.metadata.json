@@ -1,6 +1,0 @@
-{
-  "summary":  "Implementation plan to refine story circle dimensions to 48px Telegram standard, restrict story attachments strictly to Text, Images, and Videos under 30 seconds with video playback support, and bundle a standalone Node.js production server for self-hosted deployment.",
-  "updatedAt":  "2026-10-22T14:18:34.888320497Z",
-  "requestFeedback":  true,
-  "userFacing":  true
-}

@@ -84,7 +84,7 @@ const Sidebar: React.FC<SidebarProps> = ({
 
   // Load User's Contacts
   const userContactIds = useMemo(() => {
-    return currentUser.contacts || ['u_support', 'u_ali', 'u_sara'];
+    return currentUser.contacts || [];
   }, [currentUser.contacts]);
 
   // Fetch users corresponding to userContactIds

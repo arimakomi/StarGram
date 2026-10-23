@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
 import { Send, User as UserIcon, Lock, ArrowLeft, Loader2 } from 'lucide-react';
-import { doc, getDoc, setDoc, db } from '../services/firebase';
+import { authApi } from '../services/auth';
 import { User, DEFAULT_AVATAR } from '../types';
 
 import { generateLocalAvatarSvg } from '../services/avatarGenerator';
 
 interface LoginProps {
-  onLogin: (userData: User) => void;
+  onLogin: (userData: User) => void | Promise<void>;
 }
 
 const Login: React.FC<LoginProps> = ({ onLogin }) => {
@@ -24,14 +24,8 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
     
     setIsLoading(true);
     try {
-      const userRef = doc(db, "users", cleanUser);
-      const userSnap = await getDoc(userRef);
-
-      if (userSnap.exists()) {
-        setStep('password');
-      } else {
-        setStep('register');
-      }
+      const exists = await authApi.exists(cleanUser);
+      setStep(exists ? 'password' : 'register');
       setError('');
     } catch (err) {
       console.error(err);
@@ -47,54 +41,16 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
     const cleanUser = username.trim().toLowerCase();
 
     try {
-      const userRef = doc(db, "users", cleanUser);
-
-      if (action === 'register') {
-        const newUser: User = {
-          id: cleanUser,
-          username: cleanUser,
-          displayName: displayName || cleanUser,
-          password: password, // In-memory/localStorage encrypted app
-          avatar: generateLocalAvatarSvg(displayName || cleanUser, cleanUser),
-          status: 'online',
-          role: cleanUser === 'support' ? 'superadmin' : 'user',
-          phone: `+98 912 ${Math.floor(1000000 + Math.random() * 9000000)}`,
-          theme: 'night',
-          wallpaper: 'default',
-          privacy: { showStatus: 'all', showAvatar: 'all' }
-        };
-        
-        // Save to Firestore
-        await setDoc(userRef, newUser);
-        
-        localStorage.setItem('starly_session_cloud', JSON.stringify(newUser));
-        onLogin(newUser);
-      } else {
-        const userSnap = await getDoc(userRef);
-        if (userSnap.exists()) {
-          const userData = userSnap.data() as User;
-          if (userData.password === password) {
-            // Check ban status
-            if (userData.isBanned) {
-              if (userData.bannedUntil && userData.bannedUntil < Date.now()) {
-                userData.isBanned = false;
-                userData.bannedUntil = undefined;
-                await setDoc(userRef, userData);
-              } else {
-                setError(userData.banReason ? `حساب شما مسدود است: ${userData.banReason}` : 'حساب کاربری شما مسدود شده است.');
-                return;
-              }
-            }
-            localStorage.setItem('starly_session_cloud', JSON.stringify(userData));
-            onLogin(userData);
-          } else {
-            setError('رمز عبور اشتباه است.');
-          }
-        } else {
-          setError('حساب کاربری یافت نشد.');
-          setStep('register');
-        }
+      const r = action === 'register'
+        ? await authApi.register(cleanUser, password, displayName || cleanUser, generateLocalAvatarSvg(displayName || cleanUser, cleanUser))
+        : await authApi.login(cleanUser, password);
+      if (!r.success) {
+        setError(r.message || 'خطا در ورود. دوباره تلاش کنید.');
+        return;
       }
+      const user: User = { ...r.user, avatar: r.user.avatar || generateLocalAvatarSvg(r.user.displayName || cleanUser, r.user.id) };
+      localStorage.setItem('starly_session_cloud', JSON.stringify(user));
+      await onLogin(user);
     } catch (err) {
       console.error(err);
       setError('خطای سیستمی رخ داد.');
