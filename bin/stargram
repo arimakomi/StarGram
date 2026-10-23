@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# stargram — مدیریت سرویس StarGram (وضعیت، قطع/وصل، پورت، لاگ، …)
-# استفاده:  stargram            ← منوی تعاملی
-#           stargram status|start|stop|restart|enable|disable|port [N]|logs|update|backup|admin|health
+# stargram — StarGram Service Management CLI
+# Usage:  stargram [status|start|stop|restart|enable|disable|port [N]|logs|health|backup|update|admin|uninstall|remove]
+#         stargram        (interactive menu)
 set -uo pipefail
 
 SERVICE="stargram"
@@ -10,12 +10,12 @@ ENV_FILE="$APP_DIR/.env"
 
 R=$'\e[31m'; G=$'\e[32m'; Y=$'\e[33m'; B=$'\e[34m'; D=$'\e[2m'; X=$'\e[0m'
 
-need_root() { [[ $EUID -eq 0 ]] || { echo "${R}این دستور نیاز به root دارد: sudo stargram $*${X}"; exit 1; }; }
+need_root() { [[ $EUID -eq 0 ]] || { echo "${R}This command requires root privileges: sudo stargram $*${X}"; exit 1; }; }
 env_get() { grep -E "^$1=" "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2- | sed -e 's/^"//' -e 's/"$//'; }
 port() { local p; p="$(env_get PORT)"; echo "${p:-3000}"; }
-is_active()  { systemctl is-active --quiet "$SERVICE"; }
+is_active()  { systemctl is-active --quiet "$SERVICE" 2>/dev/null; }
 is_enabled() { systemctl is-enabled --quiet "$SERVICE" 2>/dev/null; }
-pause() { [[ -t 0 ]] && { echo; read -r -n1 -s -p "برای ادامه یک کلید بزنید…"; echo; }; }
+pause() { [[ -t 0 ]] && { echo; read -r -n1 -s -p "Press any key to continue..."; echo; }; }
 
 health() {
   curl -fsS -m 4 "http://127.0.0.1:$(port)/api/health" 2>/dev/null
@@ -23,60 +23,64 @@ health() {
 
 cmd_status() {
   local p ip; p="$(port)"; ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
-  echo "${B}══════════ وضعیت StarGram ══════════${X}"
-  if is_active; then echo "  سرویس:        ${G}● فعال${X}"; else echo "  سرویس:        ${R}● غیرفعال${X}"; fi
-  if is_enabled; then echo "  اجرای خودکار: ${G}روشن${X} ${D}(بعد از ریبوت بالا می‌آید)${X}"; else echo "  اجرای خودکار: ${Y}خاموش${X}"; fi
-  echo "  پورت:         $p"
+  echo "${B}══════════ StarGram Service Status ══════════${X}"
+  if is_active; then echo "  Service:        ${G}● Active (Running)${X}"; else echo "  Service:        ${R}● Inactive (Stopped)${X}"; fi
+  if is_enabled; then echo "  Auto-Start:     ${G}Enabled${X} ${D}(starts automatically on boot)${X}"; else echo "  Auto-Start:     ${Y}Disabled${X}"; fi
+  echo "  HTTP Port:      $p"
   local dbt; dbt="$(env_get DB_TYPE)"; dbt="${dbt:-mysql}"
   if [[ "$dbt" == "local" ]]; then
-    echo "  دیتابیس:      ذخیره‌سازی محلی (Local Storage Engine)"
+    echo "  Database:       Local JSON Storage Engine"
   elif [[ "$dbt" == "postgres" || "$dbt" == "pgsql" ]]; then
-    echo "  دیتابیس:      PostgreSQL ($(env_get DB_USER)@$(env_get DB_HOST):$(env_get DB_PORT)/$(env_get DB_NAME))"
+    echo "  Database:       PostgreSQL ($(env_get DB_USER)@$(env_get DB_HOST):$(env_get DB_PORT)/$(env_get DB_NAME))"
   else
-    echo "  دیتابیس:      MySQL ($(env_get DB_USER)@$(env_get DB_HOST):$(env_get DB_PORT)/$(env_get DB_NAME))"
+    echo "  Database:       MySQL / MariaDB ($(env_get DB_USER)@$(env_get DB_HOST):$(env_get DB_PORT)/$(env_get DB_NAME))"
   fi
   if is_active; then
     local h; h="$(health)"
     if [[ "$h" == *'"db":"connected"'* ]]; then
       local up; up="$(sed -n 's/.*"uptime":\([0-9]*\).*/\1/p' <<<"$h")"
-      echo "  سلامت:        ${G}سالم${X} — دیتابیس وصل است ${D}(uptime: $(( ${up:-0} / 3600 ))h $(( (${up:-0} % 3600) / 60 ))m)${X}"
+      echo "  Health:         ${G}Healthy${X} — Database connected ${D}(uptime: $(( ${up:-0} / 3600 ))h $(( (${up:-0} % 3600) / 60 ))m)${X}"
     else
-      echo "  سلامت:        ${R}پاسخ سالم دریافت نشد${X} ${D}(لاگ را ببینید)${X}"
+      echo "  Health:         ${R}Unhealthy or no response${X} ${D}(run: stargram logs)${X}"
     fi
   fi
-  echo "  مسیر پروژه:   $APP_DIR"
+  echo "  App Directory:  $APP_DIR"
 }
 
-cmd_start()   { need_root start;   systemctl start "$SERVICE"   && echo "${G}✔ سرویس روشن شد.${X}" || echo "${R}✘ روشن نشد (stargram logs)${X}"; }
-cmd_stop()    { need_root stop;    systemctl stop "$SERVICE"    && echo "${Y}■ سرویس متوقف شد.${X}"; }
-cmd_restart() { need_root restart; systemctl restart "$SERVICE" && echo "${G}✔ ری‌استارت شد.${X}" || echo "${R}✘ ری‌استارت ناموفق (stargram logs)${X}"; }
-cmd_enable()  { need_root enable;  systemctl enable "$SERVICE"  >/dev/null 2>&1 && echo "${G}✔ اجرای خودکار روشن شد.${X}"; }
-cmd_disable() { need_root disable; systemctl disable "$SERVICE" >/dev/null 2>&1 && echo "${Y}✔ اجرای خودکار خاموش شد.${X}"; }
+cmd_start()   { need_root start;   systemctl start "$SERVICE"   && echo "${G}✔ StarGram service started.${X}" || echo "${R}✘ Failed to start service (run: stargram logs)${X}"; }
+cmd_stop()    { need_root stop;    systemctl stop "$SERVICE"    && echo "${Y}■ StarGram service stopped.${X}"; }
+cmd_restart() { need_root restart; systemctl restart "$SERVICE" && echo "${G}✔ StarGram service restarted.${X}" || echo "${R}✘ Restart failed (run: stargram logs)${X}"; }
+cmd_enable()  { need_root enable;  systemctl enable "$SERVICE"  >/dev/null 2>&1 && echo "${G}✔ Auto-start on system boot enabled.${X}"; }
+cmd_disable() { need_root disable; systemctl disable "$SERVICE" >/dev/null 2>&1 && echo "${Y}✔ Auto-start on system boot disabled.${X}"; }
 
 cmd_port() {
   need_root port
   local new="${1:-}" old; old="$(port)"
-  if [[ -z "$new" ]]; then read -r -p "پورت جدید [فعلی: $old]: " new; fi
-  [[ "$new" =~ ^[0-9]+$ && "$new" -ge 1 && "$new" -le 65535 ]] || { echo "${R}پورت نامعتبر است.${X}"; return 1; }
-  [[ "$new" == "$old" ]] && { echo "پورت همین الان $old است."; return 0; }
+  if [[ -z "$new" ]]; then read -r -p "New HTTP port [current: $old]: " new; fi
+  [[ "$new" =~ ^[0-9]+$ && "$new" -ge 1 && "$new" -le 65535 ]] || { echo "${R}Invalid port number (must be 1-65535).${X}"; return 1; }
+  [[ "$new" == "$old" ]] && { echo "Port is already set to $old."; return 0; }
   if command -v ss >/dev/null 2>&1 && ss -ltn "( sport = :$new )" 2>/dev/null | grep -q LISTEN; then
-    echo "${R}پورت $new الان توسط برنامه‌ی دیگری استفاده می‌شود.${X}"; return 1
+    echo "${R}Port $new is currently in use by another process.${X}"; return 1
   fi
   if grep -q '^PORT=' "$ENV_FILE"; then sed -i "s/^PORT=.*/PORT=$new/" "$ENV_FILE"; else echo "PORT=$new" >> "$ENV_FILE"; fi
   if command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 2>&1; then
     firewall-cmd --permanent --remove-port="${old}/tcp" >/dev/null 2>&1
-    firewall-cmd --permanent --add-port="${new}/tcp" >/dev/null 2>&1 && firewall-cmd --reload >/dev/null 2>&1 && echo "${D}firewalld: پورت $old بسته و $new باز شد.${X}"
+    firewall-cmd --permanent --add-port="${new}/tcp" >/dev/null 2>&1 && firewall-cmd --reload >/dev/null 2>&1 && echo "${D}firewalld: Closed port $old and opened port $new.${X}"
   fi
   systemctl restart "$SERVICE"; sleep 2
-  if is_active; then echo "${G}✔ پورت از $old به $new تغییر کرد.${X}"; echo "${Y}اگر Nginx/Caddy دارید، proxy_pass را هم روی $new بگذارید.${X}"
-  else echo "${R}✘ سرویس بعد از تغییر بالا نیامد؛ stargram logs${X}"; fi
+  if is_active; then
+    echo "${G}✔ Port successfully changed from $old to $new.${X}"
+    echo "${Y}Note: If running behind Nginx or Caddy reverse proxy, update proxy_pass to $new.${X}"
+  else
+    echo "${R}✘ Service failed to restart after port change; check: stargram logs${X}"
+  fi
 }
 
 cmd_logs() {
   local mode="${1:-}"
   if [[ -z "$mode" && -t 0 ]]; then
-    echo "  1) ۱۰۰ خط آخر   2) زنده (خروج: Ctrl+C)   3) فقط خطاها   4) امروز"
-    read -r -p "انتخاب [1]: " mode; mode="${mode:-1}"
+    echo "  1) Last 100 lines   2) Live follow (Ctrl+C to exit)   3) Errors only   4) Today's logs"
+    read -r -p "Select option [1]: " mode; mode="${mode:-1}"
   fi
   case "${mode:-1}" in
     2|follow|-f) journalctl -u "$SERVICE" -f -n 50 --no-pager ;;
@@ -86,18 +90,7 @@ cmd_logs() {
   esac
 }
 
-cmd_health() { local h; h="$(health)" && echo "$h" || echo "${R}پاسخی از سرور نیامد.${X}"; }
-
-cmd_update() {
-  need_root update
-  cd "$APP_DIR" || return 1
-  echo "${B}➜ دریافت آخرین نسخه…${X}"
-  git pull --ff-only || { echo "${R}git pull ناموفق بود (تغییرات محلی؟).${X}"; return 1; }
-  npm install --no-audit --no-fund >/dev/null 2>&1 || npm install --no-audit --no-fund
-  echo "${B}➜ بیلد…${X}"; npm run build >/dev/null 2>&1 || { npm run build; return 1; }
-  systemctl restart "$SERVICE"; sleep 2
-  is_active && echo "${G}✔ به‌روزرسانی انجام شد.${X}" || echo "${R}✘ سرویس بالا نیامد؛ stargram logs${X}"
-}
+cmd_health() { local h; h="$(health)" && echo "$h" || echo "${R}No response received from StarGram server.${X}"; }
 
 cmd_backup() {
   need_root backup
@@ -108,31 +101,101 @@ cmd_backup() {
     f="$dir/stargram-local-$(date +%F-%H%M).json.gz"
     if [[ -f "$APP_DIR/data/stargram_db.json" ]]; then
       gzip -c "$APP_DIR/data/stargram_db.json" > "$f" \
-        && echo "${G}✔ پشتیبان دیتابیس محلی ساخته شد:${X} $f" || { echo "${R}✘ پشتیبان‌گیری ناموفق بود.${X}"; rm -f "$f"; return 1; }
+        && echo "${G}✔ Local storage database backup created:${X} $f" || { echo "${R}✘ Local storage backup failed.${X}"; rm -f "$f"; return 1; }
     else
-      echo "${Y}دیتابیس محلی هنوز رکوردی ندارد.${X}"
+      echo "${Y}Local database contains no records yet.${X}"
     fi
   elif [[ "$dbt" == "postgres" || "$dbt" == "pgsql" ]]; then
     f="$dir/stargram-pg-$(date +%F-%H%M).sql.gz"
     local pgdump; pgdump="$(command -v pg_dump || true)"
-    [[ -n "$pgdump" ]] || { echo "${R}pg_dump نصب نیست.${X}"; return 1; }
+    [[ -n "$pgdump" ]] || { echo "${R}pg_dump utility is not installed.${X}"; return 1; }
     PGPASSWORD="$(env_get DB_PASS)" "$pgdump" -h "$(env_get DB_HOST)" -p "$(env_get DB_PORT)" -U "$(env_get DB_USER)" -d "$(env_get DB_NAME)" | gzip > "$f" \
-      && echo "${G}✔ پشتیبان PostgreSQL ساخته شد:${X} $f" || { echo "${R}✘ پشتیبان‌گیری ناموفق بود.${X}"; rm -f "$f"; return 1; }
+      && echo "${G}✔ PostgreSQL backup created:${X} $f" || { echo "${R}✘ PostgreSQL backup failed.${X}"; rm -f "$f"; return 1; }
   else
     f="$dir/stargram-$(date +%F-%H%M).sql.gz"
     local dump; dump="$(command -v mariadb-dump || command -v mysqldump || true)"
-    [[ -n "$dump" ]] || { echo "${R}mysqldump/mariadb-dump نصب نیست.${X}"; return 1; }
+    [[ -n "$dump" ]] || { echo "${R}mysqldump/mariadb-dump utility is not installed.${X}"; return 1; }
     MYSQL_PWD="$(env_get DB_PASS)" "$dump" -h "$(env_get DB_HOST)" -P "$(env_get DB_PORT)" -u "$(env_get DB_USER)" --single-transaction "$(env_get DB_NAME)" | gzip > "$f" \
-      && echo "${G}✔ پشتیبان ساخته شد:${X} $f" || { echo "${R}✘ پشتیبان‌گیری ناموفق بود.${X}"; rm -f "$f"; return 1; }
+      && echo "${G}✔ MySQL / MariaDB backup created:${X} $f" || { echo "${R}✘ MySQL backup failed.${X}"; rm -f "$f"; return 1; }
+  fi
+}
+
+cmd_update() {
+  need_root update
+  cd "$APP_DIR" || return 1
+
+  echo "${B}➜ Step 1/5: Creating automated pre-update database backup snapshot...${X}"
+  cmd_backup || echo "${Y}⚠ Warning: Proceeding with update; please verify database status.${X}"
+
+  echo "${B}➜ Step 2/5: Fetching latest source code from repository...${X}"
+  if [[ -d "$APP_DIR/.git" ]]; then
+    git pull --ff-only || { echo "${R}✘ git pull failed (uncommitted local changes or network issue).${X}"; return 1; }
+  else
+    echo "${D}ℹ App directory is not a git repository clone; skipping git pull.${X}"
+  fi
+
+  echo "${B}➜ Step 3/5: Updating dependencies (npm install)...${X}"
+  npm install --no-audit --no-fund >/dev/null 2>&1 || npm install --no-audit --no-fund
+
+  echo "${B}➜ Step 4/5: Building production frontend bundle (npm run build)...${X}"
+  npm run build >/dev/null 2>&1 || { npm run build; return 1; }
+
+  echo "${B}➜ Step 5/5: Synchronizing database schema and migrations...${X}"
+  node server.js --init >/dev/null 2>&1 || node server.js --init
+
+  echo "${B}➜ Restarting StarGram service...${X}"
+  systemctl restart "$SERVICE"
+  sleep 2
+  if is_active; then
+    echo "${G}✔ StarGram update completed successfully.${X}"
+    cmd_status
+  else
+    echo "${R}✘ StarGram service failed to restart after update; check: stargram logs${X}"
+    return 1
   fi
 }
 
 cmd_admin() {
   need_root admin
-  local u p; read -r -p "نام کاربری ادمین [$(env_get ADMIN_USER)]: " u; u="${u:-$(env_get ADMIN_USER)}"
-  read -r -s -p "رمز جدید (حداقل ۶ کاراکتر): " p; echo
-  [[ ${#p} -ge 6 ]] || { echo "${R}رمز کوتاه است.${X}"; return 1; }
+  local u p; read -r -p "Admin username [$(env_get ADMIN_USER)]: " u; u="${u:-$(env_get ADMIN_USER)}"
+  read -r -s -p "New password (minimum 6 characters): " p; echo
+  [[ ${#p} -ge 6 ]] || { echo "${R}Password must be at least 6 characters.${X}"; return 1; }
   cd "$APP_DIR" && ADMIN_USER="$u" ADMIN_PASS="$p" node server.js --init
+}
+
+cmd_uninstall() {
+  need_root uninstall
+  if [[ -t 0 ]]; then
+    echo "${Y}══════════ StarGram Service Uninstall ══════════${X}"
+    echo "This will stop and remove the systemd background service and the CLI symlink."
+    echo "Your database data, .env configuration, and backups will be SAFELY PRESERVED."
+    echo
+    read -r -p "Are you sure you want to proceed? [y/N]: " confirm
+    [[ "$confirm" =~ ^[yY]([eE][sS])?$ ]] || { echo "Uninstall cancelled."; return 0; }
+  fi
+
+  echo "${B}➜ Stopping and disabling StarGram systemd service...${X}"
+  systemctl stop "$SERVICE" 2>/dev/null || true
+  systemctl disable "$SERVICE" 2>/dev/null || true
+
+  if [[ -f "/etc/systemd/system/${SERVICE}.service" ]]; then
+    rm -f "/etc/systemd/system/${SERVICE}.service"
+    systemctl daemon-reload 2>/dev/null || true
+    echo "${D}Removed /etc/systemd/system/${SERVICE}.service${X}"
+  fi
+
+  if [[ -L "/usr/local/bin/stargram" || -f "/usr/local/bin/stargram" ]]; then
+    rm -f /usr/local/bin/stargram
+    echo "${D}Removed /usr/local/bin/stargram${X}"
+  fi
+
+  echo
+  echo "${G}✔ StarGram service and CLI shortcut have been uninstalled.${X}"
+  echo "  ${D}• All database data, .env configuration, and backups were PRESERVED:${X}"
+  echo "    Directory: $APP_DIR"
+  echo "  ${D}• To run StarGram manually in foreground: cd $APP_DIR && npm start${X}"
+  echo "  ${D}• To reinstall systemd service: sudo bash $APP_DIR/setup.sh${X}"
+  echo
 }
 
 menu() {
@@ -140,14 +203,14 @@ menu() {
     clear 2>/dev/null || true
     cmd_status
     echo
-    echo "  ${B}1)${X} روشن کردن (start)        ${B}6)${X} لاگ‌ها"
-    echo "  ${B}2)${X} خاموش کردن (stop)        ${B}7)${X} تست سلامت / دیتابیس"
-    echo "  ${B}3)${X} ری‌استارت               ${B}8)${X} به‌روزرسانی از گیت‌هاب"
-    echo "  ${B}4)${X} تغییر پورت              ${B}9)${X} پشتیبان‌گیری دیتابیس"
-    echo "  ${B}5)${X} اجرای خودکار (روشن/خاموش) ${B}a)${X} تغییر رمز ادمین"
-    echo "  ${B}0)${X} خروج"
+    echo "  ${B}1)${X} Start service                 ${B}6)${X} View logs"
+    echo "  ${B}2)${X} Stop service                  ${B}7)${X} Health & DB check"
+    echo "  ${B}3)${X} Restart service               ${B}8)${X} Safe update (backup + pull + build)"
+    echo "  ${B}4)${X} Change HTTP port              ${B}9)${X} Database backup snapshot"
+    echo "  ${B}5)${X} Toggle auto-start on boot     ${B}a)${X} Reset admin credentials"
+    echo "  ${B}u)${X} Uninstall service & CLI        ${B}0)${X} Exit"
     echo
-    read -r -p "انتخاب: " c || exit 0
+    read -r -p "Select option: " c || exit 0
     echo
     case "$c" in
       1) cmd_start ;;
@@ -160,27 +223,49 @@ menu() {
       8) cmd_update ;;
       9) cmd_backup ;;
       a|A) cmd_admin ;;
+      u|U) cmd_uninstall; exit 0 ;;
       0|q|Q) exit 0 ;;
-      *) echo "گزینه نامعتبر." ;;
+      *) echo "Invalid option." ;;
     esac
     pause
   done
 }
 
 case "${1:-menu}" in
-  status)  cmd_status ;;
-  start)   cmd_start ;;
-  stop)    cmd_stop ;;
-  restart) cmd_restart ;;
-  enable)  cmd_enable ;;
-  disable) cmd_disable ;;
-  port)    cmd_port "${2:-}" ;;
-  logs)    cmd_logs "${2:-}" ;;
-  health)  cmd_health ;;
-  update)  cmd_update ;;
-  backup)  cmd_backup ;;
-  admin)   cmd_admin ;;
-  menu)    menu ;;
-  -h|--help|help) sed -n '2,4p' "$0" ;;
-  *) echo "دستور ناشناخته: $1 — برای راهنما: stargram help"; exit 1 ;;
+  status)            cmd_status ;;
+  start)             cmd_start ;;
+  stop)              cmd_stop ;;
+  restart)           cmd_restart ;;
+  enable)            cmd_enable ;;
+  disable)           cmd_disable ;;
+  port)              cmd_port "${2:-}" ;;
+  logs)              cmd_logs "${2:-}" ;;
+  health)            cmd_health ;;
+  update)            cmd_update ;;
+  backup)            cmd_backup ;;
+  admin)             cmd_admin ;;
+  uninstall|remove)  cmd_uninstall ;;
+  menu)              menu ;;
+  -h|--help|help)
+    echo "StarGram Management CLI"
+    echo "Usage: stargram [command]"
+    echo
+    echo "Commands:"
+    echo "  status            Display service, database and health status"
+    echo "  start             Start StarGram systemd service"
+    echo "  stop              Stop StarGram systemd service"
+    echo "  restart           Restart StarGram systemd service"
+    echo "  enable            Enable auto-start on system reboot"
+    echo "  disable           Disable auto-start on system reboot"
+    echo "  port [N]          View or change HTTP port"
+    echo "  logs [follow]     View journal logs (use -f for live follow)"
+    echo "  health            Perform health check query against API"
+    echo "  backup            Create compressed database backup snapshot"
+    echo "  update            Safe update (backup DB -> git pull -> build -> restart)"
+    echo "  admin             Reset admin username / password"
+    echo "  uninstall|remove  Uninstall systemd service & CLI (preserves data)"
+    echo "  menu              Launch interactive management menu"
+    echo
+    ;;
+  *) echo "Unknown command: $1 — Run 'stargram help' for available commands."; exit 1 ;;
 esac

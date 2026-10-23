@@ -70,7 +70,7 @@ class LocalAdapter {
           for (const s of raw.sessions) this.sessions.set(s.token_hash, s);
         }
       } catch (e) {
-        console.warn('⚠️ اشکال در خواندن دیتابیس محلی؛ ساخت دیتابیس نو:', e.message);
+        console.warn('⚠️ Error reading local storage database; initializing new database:', e.message);
       }
     }
   }
@@ -85,7 +85,7 @@ class LocalAdapter {
       fs.writeFileSync(tmp, JSON.stringify(data), 'utf8');
       fs.renameSync(tmp, LOCAL_DB_FILE);
     } catch (e) {
-      console.error('❌ خطا در ذخیره‌سازی دیتابیس محلی:', e);
+      console.error('❌ Failed to save local storage database:', e);
     }
   }
 
@@ -368,7 +368,7 @@ async function setupDatabase() {
   // ۱) بررسی PostgreSQL
   if (dbType === 'postgres' || dbType === 'pgsql' || dbUrl.startsWith('postgres://') || dbUrl.startsWith('postgresql://') || process.env.PGHOST) {
     try {
-      console.log('🔄 در حال اتصال به دیتابیس PostgreSQL…');
+      console.log('🔄 Connecting to PostgreSQL database...');
       const pgConfig = dbUrl ? { connectionString: dbUrl } : {
         host: process.env.PGHOST || process.env.DB_HOST || '127.0.0.1',
         port: parseInt(process.env.PGPORT || process.env.DB_PORT || '5432', 10),
@@ -381,17 +381,17 @@ async function setupDatabase() {
       const adapter = new PostgresAdapter(pool);
       await adapter.ping();
       await adapter.initSchema();
-      console.log('✅ با موفقیت به PostgreSQL متصل شد.');
+      console.log('✅ Successfully connected to PostgreSQL.');
       return adapter;
     } catch (e) {
-      console.warn('⚠️ اتصال به PostgreSQL ناموفق بود:', e.message);
+      console.warn('⚠️ Connection to PostgreSQL failed:', e.message);
     }
   }
 
   // ۲) بررسی MySQL / MariaDB
   if (dbType === 'mysql' || process.env.DB_HOST || dbUrl.startsWith('mysql://')) {
     try {
-      console.log('🔄 در حال اتصال به دیتابیس MySQL / MariaDB…');
+      console.log('🔄 Connecting to MySQL / MariaDB database...');
       const mysqlConfig = dbUrl ? { uri: dbUrl } : {
         host: process.env.DB_HOST || '127.0.0.1',
         port: parseInt(process.env.DB_PORT || '3306', 10),
@@ -407,15 +407,15 @@ async function setupDatabase() {
       const adapter = new MysqlAdapter(pool);
       await adapter.ping();
       await adapter.initSchema();
-      console.log('✅ با موفقیت به MySQL / MariaDB متصل شد.');
+      console.log('✅ Successfully connected to MySQL / MariaDB.');
       return adapter;
     } catch (e) {
-      console.warn('⚠️ اتصال به MySQL ناموفق بود:', e.message);
+      console.warn('⚠️ Connection to MySQL / MariaDB failed:', e.message);
     }
   }
 
   // ۳) فال‌بک امن به ذخیره‌سازی محلی (Local File Storage)
-  console.log('ℹ️ دیتابیس خارجی در دسترس نیست؛ اجرای برنامه با ذخیره‌سازی محلی (Local Storage).');
+  console.log('ℹ️ External database not configured or unavailable; using Local Storage engine.');
   const local = new LocalAdapter();
   await local.initSchema();
   return local;
@@ -440,14 +440,14 @@ async function ensureAdmin({ reset }) {
       status: 'online', role: 'superadmin', phone: '', theme: 'night', wallpaper: 'default',
       contacts: [], privacy: { showStatus: 'all', showAvatar: 'all' }
     }, now);
-    console.log(`✅ حساب مدیر «${username}» ایجاد شد.`);
+    console.log(`✅ Admin account "${username}" initialized.`);
   } else if (reset && pass) {
     existing.passwordHash = hashPassword(pass);
     existing.role = 'superadmin';
     existing.isBanned = false;
     delete existing.password;
     await dbAdapter.putDoc('users', username, existing, now);
-    console.log(`✅ رمز و نقش مدیر «${username}» به‌روزرسانی شد.`);
+    console.log(`✅ Admin account "${username}" credentials updated.`);
   }
   if (!(await dbAdapter.getDoc('system_config', 'main'))) {
     await dbAdapter.putDoc('system_config', 'main', {
@@ -763,7 +763,7 @@ app.use((req, res) => {
   if (req.method !== 'GET' || req.path.startsWith('/api/')) return res.status(404).json({ success: false, message: 'Not found' });
   const indexPath = path.join(DIST_DIR, 'index.html');
   if (fs.existsSync(indexPath)) return res.sendFile(indexPath);
-  res.status(503).send('پوشه dist یافت نشد. ابتدا دستور npm run build را اجرا کنید.');
+  res.status(503).send('Production dist directory not found. Please run "npm run build" first.');
 });
 
 // ───────────── راه‌اندازی سرور ─────────────
@@ -771,7 +771,7 @@ try {
   dbAdapter = await setupDatabase();
   await ensureAdmin({ reset: INIT_ONLY });
 } catch (e) {
-  console.error('❌ آماده‌سازی سرور با خطا مواجه شد:', e.message);
+  console.error('❌ Server initialization failed:', e.message);
   process.exit(1);
 }
 
@@ -781,5 +781,5 @@ if (INIT_ONLY) {
 }
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 StarGram با دیتابیس [${dbAdapter.type}] روی پورت ${PORT} فعال شد — http://localhost:${PORT}`);
+  console.log(`🚀 StarGram running with [${dbAdapter.type}] database on port ${PORT} — http://localhost:${PORT}`);
 });

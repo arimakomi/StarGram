@@ -154,17 +154,23 @@ npm start
 
 ## 🔄 دستور مدیریتی `stargram`
 
-بعد از نصب در لینوکس، ابزار خط فرمانی `stargram` در دسترس است:
+ابزار خط فرمانی و محیط ترمینال (`setup.sh` و `stargram`) کاملاً به زبان انگلیسی طراحی شده‌اند. بعد از نصب در لینوکس، ابزار خط فرمانی `stargram` در دسترس است:
 
 ```bash
-sudo stargram status     # بررسی وضعیت سرویس، سلامت و اتصال دیتابیس
-sudo stargram restart    # ری‌استارت سرویس
-sudo stargram logs       # مشاهده لاگ‌های زنده
-sudo stargram port 8080  # تغییر آسان پورت
-sudo stargram backup     # تهیه پشتیبان فشرده (.sql.gz یا .json.gz)
-sudo stargram update     # دریافت آخرین نسخه و ری‌بیلد خودکار
-sudo stargram admin      # تغییر سریع رمز حساب ادمین
+sudo stargram status         # بررسی وضعیت سرویس، سلامت و اتصال دیتابیس
+sudo stargram restart        # ری‌استارت سرویس
+sudo stargram logs           # مشاهده لاگ‌های سرویس (journalctl)
+sudo stargram port 8080      # تغییر پورت HTTP برنامه
+sudo stargram backup         # تهیه پشتیبان فشرده دیتابیس (.sql.gz یا .json.gz)
+sudo stargram update         # آپدیت امن: پشتیبان‌گیری خودکار دیتابیس + git pull + بیلد مجدد + مایگریشن
+sudo stargram admin          # تغییر سریع نام کاربری / رمز حساب مدیر ارشد
+sudo stargram uninstall      # حذف سرویس systemd و دستور (داده‌های دیتابیس و .env کاملاً حفظ می‌شوند)
+sudo stargram menu           # باز کردن منوی تعاملی مدیریتی در ترمینال
 ```
+
+> **نکته امنیتی آپدیت و حذف:**  
+> دستور `stargram update` پیش از هرگونه تغییر در کدها یا بسته‌ها، ابتدا یک نسخه پشتیبان کامل و فشرده از دیتابیس تهیه می‌کند تا اطلاعات کاربران در برابر قطعی یا تغییرات محافظت شود.  
+> دستور `stargram uninstall` فقط سرویس پس‌زمینه و میانبر ترمینال را حذف می‌کند و کلیه پایگاه‌های داده، فایل `.env` و پوشه `data/` را به شکل کاملاً دست‌نخورده حفظ می‌نماید.
 
 ---
 
