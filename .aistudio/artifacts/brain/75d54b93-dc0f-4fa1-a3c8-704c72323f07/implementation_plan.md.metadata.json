@@ -1,6 +1,0 @@
-{
-  "summary":  "Implementation plan for StarGram CLI safe force-sync update to upstream repository while strictly preserving database, environment configurations, and backup archives.",
-  "updatedAt":  "2026-10-23T10:12:44.274220350Z",
-  "requestFeedback":  true,
-  "userFacing":  true
-}
