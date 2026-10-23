@@ -94,19 +94,28 @@ npm start
 
 ## 🔄 مدیریت و نگهداری
 
-بعد از نصب، دستور **`stargram`** در دسترس است. بدون آرگومان یک منوی تعاملی باز می‌کند که وضعیت (فعال/غیرفعال، پورت، سلامت دیتابیس) را نشان می‌دهد و امکان روشن/خاموش، ری‌استارت، تغییر پورت، لاگ، به‌روزرسانی، پشتیبان‌گیری و تغییر رمز ادمین را دارد:
+بعد از نصب، دستور **`stargram`** در دسترس است. بدون آرگومان یک منوی تعاملی باز می‌کند که بالای آن وضعیت (فعال/غیرفعال، اجرای خودکار، پورت، آدرس، سلامت برنامه و اتصال دیتابیس) نمایش داده می‌شود.
 
 ```bash
 sudo stargram                 # منوی تعاملی
-stargram status               # وضعیت
-sudo stargram start|stop|restart
-sudo stargram port 8080       # تغییر پورت (فایل .env + فایروال + ری‌استارت)
-sudo stargram logs [follow|errors|today]
-sudo stargram enable|disable  # اجرای خودکار بعد از ریبوت
-sudo stargram update          # git pull + build + restart
-sudo stargram backup          # پشتیبان فشرده‌ی دیتابیس در backups/
-sudo stargram admin           # تغییر رمز ادمین
 ```
+
+| گزینه‌ی منو | دستور مستقیم | کار |
+|---|---|---|
+| وضعیت | `stargram status` | نمایش فعال/غیرفعال، پورت، آدرس و سلامت |
+| ۱ — روشن کردن | `sudo stargram start` | روشن کردن سرویس |
+| ۲ — خاموش کردن | `sudo stargram stop` | قطع سرویس |
+| ۳ — ری‌استارت | `sudo stargram restart` | راه‌اندازی مجدد |
+| ۴ — تغییر پورت | `sudo stargram port 8080` | تغییر `PORT` در `.env`، بستن/باز کردن پورت در firewalld و ری‌استارت |
+| ۵ — اجرای خودکار | `sudo stargram enable` / `disable` | روشن/خاموش بودن اجرا بعد از ریبوت |
+| ۶ — لاگ‌ها | `sudo stargram logs [follow\|errors\|today]` | ۱۰۰ خط آخر، زنده، فقط خطاها یا امروز |
+| ۷ — تست سلامت | `stargram health` | پاسخ `/api/health` و وضعیت اتصال دیتابیس |
+| ۸ — به‌روزرسانی | `sudo stargram update` | `git pull` + `npm install` + بیلد + ری‌استارت |
+| ۹ — پشتیبان‌گیری | `sudo stargram backup` | پشتیبان فشرده‌ی دیتابیس در `backups/` (مسیر دیگر: `BACKUP_DIR=...`) |
+| a — رمز ادمین | `sudo stargram admin` | تغییر رمز (یا ساخت دوباره‌ی) ادمین |
+
+> اگر قبل از اضافه شدن این دستور نصب کرده‌اید، یک بار این را بزنید:
+> `cd /opt/stargram && git pull && sudo ln -sf $PWD/bin/stargram /usr/local/bin/stargram`
 
 معادل دستی:
 
