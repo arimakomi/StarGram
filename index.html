@@ -40,6 +40,8 @@
       --tg-text: #ffffff;
       --tg-text-secondary: #708499;
       --tg-input: #242f3d;
+      --chat-font-size: 15px;
+      --message-bubble-radius: 1rem;
     }
 
     body { 
@@ -55,8 +57,50 @@
     .day-theme { 
       --tg-bg: #f0f2f5; 
       --tg-secondary: #ffffff; 
-      --tg-text: #000000;
+      --tg-text: #1f2937;
+      --tg-text-secondary: #526273;
       --tg-input: #f4f4f5;
+    }
+
+    .day-theme [class*="bg-[#0e1621]"],
+    .day-theme [class*="bg-[#17212b]"],
+    .day-theme [class*="bg-[#1e2c3a]"],
+    .day-theme [class*="bg-[#242f3d]"],
+    .day-theme [class*="bg-[#2b3949]"],
+    .day-theme [class*="bg-[#2b3a4a]"],
+    .day-theme [class*="bg-[#2e3c4e]"],
+    .day-theme [class*="bg-[#2f3d4e]"],
+    .day-theme [class*="bg-[#1e2a38]"],
+    .day-theme [class*="bg-[#1c2733]"],
+    .day-theme [class*="bg-[#1b2531]"],
+    .day-theme [class*="bg-[#121b24]"],
+    .day-theme [class*="bg-[#182533]"],
+    .day-theme [class*="bg-[#111827]"],
+    .day-theme [class*="bg-[#0b141a]"] {
+      background-color: #ffffff !important;
+    }
+
+    .day-theme [class*="bg-white/5"],
+    .day-theme [class*="bg-white/10"] {
+      background-color: rgba(15, 23, 42, 0.06) !important;
+    }
+
+    .day-theme [class*="text-white"] {
+      color: #1f2937 !important;
+    }
+
+    .day-theme [class*="bg-[#3390ec]"] [class*="text-white"],
+    .day-theme [class*="bg-[#2b7bc4]"] [class*="text-white"],
+    .day-theme .message-bubble[class*="bg-[#2b5278]"] {
+      color: #ffffff !important;
+    }
+
+    .day-theme .message-bubble[class*="bg-[#182533]"] {
+      color: #1f2937 !important;
+    }
+
+    .day-theme [class*="border-white"] {
+      border-color: rgba(15, 23, 42, 0.12) !important;
     }
     
     .oled-theme { 
@@ -64,6 +108,15 @@
       --tg-secondary: #000000; 
       --tg-input: #121212;
       border-color: #1a1a1a !important;
+    }
+
+    .oled-theme [class*="bg-[#0e1621]"],
+    .oled-theme [class*="bg-[#17212b]"],
+    .oled-theme [class*="bg-[#1e2c3a]"],
+    .oled-theme [class*="bg-[#242f3d]"],
+    .oled-theme [class*="bg-[#2b3949]"],
+    .oled-theme [class*="bg-[#182533]"] {
+      background-color: #000000 !important;
     }
 
     .arctic-theme {
@@ -74,6 +127,11 @@
       --tg-text-secondary: #8696a0;
       --tg-input: #202c33;
     }
+
+    .arctic-theme [class*="bg-[#0e1621]"] { background-color: var(--tg-bg) !important; }
+    .arctic-theme [class*="bg-[#17212b]"],
+    .arctic-theme [class*="bg-[#182533]"] { background-color: var(--tg-secondary) !important; }
+    .arctic-theme [class*="bg-[#242f3d]"] { background-color: #202c33 !important; }
 
     .no-scrollbar::-webkit-scrollbar { display: none; }
     .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
@@ -98,7 +156,12 @@
       max-width: 100%;
       position: relative;
       transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+      border-radius: var(--message-bubble-radius) !important;
     }
+
+    .message-bubble.rounded-tr-none { border-top-right-radius: 0 !important; }
+    .message-bubble.rounded-tl-none { border-top-left-radius: 0 !important; }
+    .chat-message-text { font-size: var(--chat-font-size); }
     
     .chat-wallpaper {
       background-image: radial-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 0);

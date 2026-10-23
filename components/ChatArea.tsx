@@ -16,6 +16,7 @@ import { compressImage } from '../services/imageUtils';
 import { encryptMessage } from '../services/cryptoUtils';
 import { getUserPresence, formatSeenTime } from '../services/presenceUtils';
 import { resolveWallpaperStyle, WALLPAPER_PRESETS } from '../services/wallpaperPresets';
+import { APP_PREFERENCES_CHANGED, PREFERENCE_KEYS, readBooleanPreference } from '../services/appPreferences';
 
 interface ChatAreaProps {
   chat: Chat | null;
@@ -284,10 +285,46 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordingTimerRef = useRef<any>(null);
+  const previousChatIdRef = useRef<string | null>(null);
+  const [preferencesRevision, setPreferencesRevision] = useState(0);
+  const [revealedImages, setRevealedImages] = useState<Set<string>>(() => new Set());
+
+  const autoDownloadPhotos = readBooleanPreference(PREFERENCE_KEYS.autoDownloadPhotos);
+  const autoDownloadVoice = readBooleanPreference(PREFERENCE_KEYS.autoDownloadVoice);
 
   useEffect(() => {
-    msgEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [chat?.messages.length, isTyping, chat?.id]);
+    const handlePreferencesChanged = () => setPreferencesRevision(revision => revision + 1);
+    window.addEventListener(APP_PREFERENCES_CHANGED, handlePreferencesChanged);
+    return () => window.removeEventListener(APP_PREFERENCES_CHANGED, handlePreferencesChanged);
+  }, []);
+
+  useEffect(() => {
+    const chatChanged = previousChatIdRef.current !== (chat?.id || null);
+    if (chatChanged || readBooleanPreference(PREFERENCE_KEYS.autoScroll)) {
+      msgEndRef.current?.scrollIntoView({ behavior: chatChanged ? 'auto' : 'smooth' });
+    }
+    previousChatIdRef.current = chat?.id || null;
+  }, [chat?.messages.length, isTyping, chat?.id, preferencesRevision]);
+
+  useEffect(() => {
+    if (!autoDownloadVoice || !chat) return;
+    const preloadedAudio = chat.messages
+      .filter(message => !!message.audioUrl)
+      .slice(-5)
+      .map(message => {
+        const audio = new Audio();
+        audio.preload = 'auto';
+        audio.src = message.audioUrl!;
+        return audio;
+      });
+    return () => {
+      preloadedAudio.forEach(audio => {
+        audio.pause();
+        audio.removeAttribute('src');
+        audio.load();
+      });
+    };
+  }, [autoDownloadVoice, chat?.id, chat?.messages.length, preferencesRevision]);
 
   // Voice recording timer
   useEffect(() => {
@@ -937,6 +974,10 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                     {msg.imageUrl && (
                       <div 
                         onClick={() => {
+                          if (!autoDownloadPhotos && !revealedImages.has(msg.id)) {
+                            setRevealedImages(current => new Set(current).add(msg.id));
+                            return;
+                          }
                           setLightboxImage(msg.imageUrl || null);
                           setZoomScale(1);
                           setPanOffset({ x: 0, y: 0 });
@@ -944,10 +985,24 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                         className="rounded-xl overflow-hidden cursor-pointer group/img relative mb-1.5 bg-black/20"
                         title="کلیک برای بزرگنمایی کامل تصویر"
                       >
-                        <img 
-                          src={msg.imageUrl} 
-                          className="max-h-[360px] w-full object-cover rounded-xl transition-transform duration-200 group-hover/img:scale-[1.02]" 
-                        />
+                        {autoDownloadPhotos || revealedImages.has(msg.id) ? (
+                          <img
+                            src={msg.imageUrl}
+                            loading={autoDownloadPhotos ? 'eager' : 'lazy'}
+                            className="max-h-[360px] w-full object-cover rounded-xl transition-transform duration-200 group-hover/img:scale-[1.02]"
+                          />
+                        ) : (
+                          <button
+                            type="button"
+                            className="w-full min-h-28 flex items-center justify-center gap-2 text-white text-xs bg-black/20"
+                            onClick={event => {
+                              event.stopPropagation();
+                              setRevealedImages(current => new Set(current).add(msg.id));
+                            }}
+                          >
+                            <Download size={16} /> برای بارگیری عکس بزنید
+                          </button>
+                        )}
                         <div className="absolute inset-0 bg-black/25 opacity-0 group-hover/img:opacity-100 transition-opacity flex items-center justify-center text-white text-xs gap-1.5 font-bold pointer-events-none">
                           <ZoomIn size={16} /> بزرگنمایی تصویر
                         </div>
@@ -1034,7 +1089,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
 
                     {/* Text Content (Rendered only if real text exists, not placeholders) */}
                     {shouldRenderText(msg.text) && (
-                      <p className="text-[14px] leading-relaxed whitespace-pre-wrap font-normal break-words">
+                      <p className="chat-message-text leading-relaxed whitespace-pre-wrap font-normal break-words">
                         {renderMessageText(msg.text)}
                       </p>
                     )}
@@ -1427,14 +1482,16 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                 value={inputText}
                 onChange={handleInputChange}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
+                  const sendOnEnter = readBooleanPreference(PREFERENCE_KEYS.sendOnEnter);
+                  const shouldSend = e.key === 'Enter' && (sendOnEnter ? !e.shiftKey : (e.ctrlKey || e.metaKey));
+                  if (shouldSend) {
                     e.preventDefault();
                     handleSend();
                   }
                 }}
                 rows={1}
                 placeholder={isGroup ? "پیام خود را بنویسید (برای تگ @ بزنید)..." : "پیام خود را بنویسید..."}
-                className="flex-1 bg-transparent border-none outline-none text-[14px] mx-1 md:mx-2 py-2 max-h-36 resize-none custom-scrollbar placeholder:text-[#708499] text-white"
+                className="chat-message-text flex-1 bg-transparent border-none outline-none mx-1 md:mx-2 py-2 max-h-36 resize-none custom-scrollbar placeholder:text-[#708499] text-white"
               />
 
               {/* Poll Button */}

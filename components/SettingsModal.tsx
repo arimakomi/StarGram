@@ -10,6 +10,8 @@ import {
 import { compressImage } from '../services/imageUtils';
 import { WALLPAPER_PRESETS, resolveWallpaperStyle } from '../services/wallpaperPresets';
 import { playNotificationSound, requestNotificationPermission, isNotificationGranted } from '../services/notificationService';
+import { authApi } from '../services/auth';
+import { applyAppearancePreferences, PREFERENCE_KEYS, readBooleanPreference, readPreference, writePreference } from '../services/appPreferences';
 
 interface SettingsModalProps {
   user: User;
@@ -44,39 +46,23 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ user, onClose, onUpdateUs
   // Appearance & Wallpaper
   const [customWallpaperUrl, setCustomWallpaperUrl] = useState('');
   const wallpaperFileInputRef = useRef<HTMLInputElement>(null);
-  const [fontSize, setFontSize] = useState<string>(() => {
-    try { return localStorage.getItem('starchat_font_size') || '15px'; } catch { return '15px'; }
-  });
-  const [bubbleRoundness, setBubbleRoundness] = useState<string>(() => {
-    try { return localStorage.getItem('starchat_bubble_style') || 'rounded-2xl'; } catch { return 'rounded-2xl'; }
-  });
+  const [fontSize, setFontSize] = useState<string>(() => readPreference(PREFERENCE_KEYS.fontSize, '15px'));
+  const [bubbleRoundness, setBubbleRoundness] = useState<string>(() => readPreference(PREFERENCE_KEYS.bubbleRoundness, '1rem'));
 
   // Notifications & Sound
   const [notifGranted, setNotifGranted] = useState(isNotificationGranted());
-  const [soundEnabled, setSoundEnabled] = useState<boolean>(() => {
-    try { return localStorage.getItem('starly_sound_enabled') !== 'false'; } catch { return true; }
-  });
-  const [previewTextEnabled, setPreviewTextEnabled] = useState<boolean>(() => {
-    try { return localStorage.getItem('starly_notif_preview') !== 'false'; } catch { return true; }
-  });
+  const [soundEnabled, setSoundEnabled] = useState<boolean>(() => readBooleanPreference(PREFERENCE_KEYS.soundEnabled));
+  const [previewTextEnabled, setPreviewTextEnabled] = useState<boolean>(() => readBooleanPreference(PREFERENCE_KEYS.previewTextEnabled));
 
   // Storage & Cache
   const [cacheSize, setCacheSize] = useState<string>('۴.۲ مگابایت');
   const [cacheCleared, setCacheCleared] = useState(false);
-  const [autoDownloadPhotos, setAutoDownloadPhotos] = useState<boolean>(() => {
-    try { return localStorage.getItem('starchat_auto_photos') !== 'false'; } catch { return true; }
-  });
-  const [autoDownloadVoice, setAutoDownloadVoice] = useState<boolean>(() => {
-    try { return localStorage.getItem('starchat_auto_voice') !== 'false'; } catch { return true; }
-  });
+  const [autoDownloadPhotos, setAutoDownloadPhotos] = useState<boolean>(() => readBooleanPreference(PREFERENCE_KEYS.autoDownloadPhotos));
+  const [autoDownloadVoice, setAutoDownloadVoice] = useState<boolean>(() => readBooleanPreference(PREFERENCE_KEYS.autoDownloadVoice));
 
   // Chat preferences
-  const [sendOnEnter, setSendOnEnter] = useState<boolean>(() => {
-    try { return localStorage.getItem('starchat_send_on_enter') !== 'false'; } catch { return true; }
-  });
-  const [autoScroll, setAutoScroll] = useState<boolean>(() => {
-    try { return localStorage.getItem('starchat_auto_scroll') !== 'false'; } catch { return true; }
-  });
+  const [sendOnEnter, setSendOnEnter] = useState<boolean>(() => readBooleanPreference(PREFERENCE_KEYS.sendOnEnter));
+  const [autoScroll, setAutoScroll] = useState<boolean>(() => readBooleanPreference(PREFERENCE_KEYS.autoScroll));
 
   // Device & OS detection
   const [sessionInfo, setSessionInfo] = useState({ browser: 'Unknown', os: 'Unknown' });
@@ -98,18 +84,30 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ user, onClose, onUpdateUs
 
     setSessionInfo({ browser: b, os: o });
 
-    // Estimate cache size from localStorage
+    void refreshCacheSize();
+  }, []);
+
+  const refreshCacheSize = async () => {
     try {
       let totalBytes = 0;
-      for (const k in localStorage) {
-        if (localStorage.hasOwnProperty(k)) {
-          totalBytes += (localStorage[k].length + k.length) * 2;
+      for (const key of Object.keys(localStorage)) totalBytes += (key.length + (localStorage.getItem(key)?.length || 0)) * 2;
+      if ('caches' in window) {
+        const cacheNames = await caches.keys();
+        for (const cacheName of cacheNames) {
+          const cache = await caches.open(cacheName);
+          const entries = await cache.keys();
+          for (const request of entries) {
+            const response = await cache.match(request);
+            if (response) totalBytes += (await response.clone().blob()).size;
+          }
         }
       }
       const mb = (totalBytes / (1024 * 1024)).toFixed(1);
       setCacheSize(`${mb} مگابایت`);
-    } catch {}
-  }, []);
+    } catch {
+      setCacheSize('نامشخص');
+    }
+  };
 
   // ESC key handler for SettingsModal
   useEffect(() => {
@@ -137,11 +135,10 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ user, onClose, onUpdateUs
     onUpdateUser(updated);
   };
 
-  const handleClearCache = () => {
+  const handleClearCache = async () => {
     try {
       const savedTheme = localStorage.getItem('starly_theme') || user.theme;
       const savedToken = localStorage.getItem('starly_token');
-      // Clear non-critical caches
       Object.keys(localStorage).forEach(key => {
         if (key.startsWith('cached_') || key.startsWith('draft_')) {
           localStorage.removeItem(key);
@@ -149,7 +146,10 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ user, onClose, onUpdateUs
       });
       if (savedToken) localStorage.setItem('starly_token', savedToken);
       if (savedTheme) localStorage.setItem('starly_theme', savedTheme);
-      setCacheSize('۰.۲ مگابایت');
+      if ('caches' in window) {
+        await Promise.all((await caches.keys()).map(cacheName => caches.delete(cacheName)));
+      }
+      await refreshCacheSize();
       setCacheCleared(true);
       setTimeout(() => setCacheCleared(false), 3000);
     } catch (e) {
@@ -163,12 +163,12 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ user, onClose, onUpdateUs
 
   const handleToggleSound = (enabled: boolean) => {
     setSoundEnabled(enabled);
-    localStorage.setItem('starly_sound_enabled', enabled ? 'true' : 'false');
+    writePreference(PREFERENCE_KEYS.soundEnabled, enabled ? 'true' : 'false');
   };
 
   const handleTogglePreview = (enabled: boolean) => {
     setPreviewTextEnabled(enabled);
-    localStorage.setItem('starly_notif_preview', enabled ? 'true' : 'false');
+    writePreference(PREFERENCE_KEYS.previewTextEnabled, enabled ? 'true' : 'false');
   };
 
   const handleRequestPushNotif = async () => {
@@ -614,7 +614,12 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ user, onClose, onUpdateUs
                {/* Log out */}
                <div className="pt-1">
                  <button 
-                   onClick={() => { localStorage.removeItem('starly_session'); window.location.reload(); }} 
+                   onClick={async () => {
+                     await authApi.logout();
+                     localStorage.removeItem('starly_session_cloud');
+                     localStorage.removeItem('starly_current_user');
+                     window.location.reload();
+                   }}
                    className="w-full py-3.5 bg-white/5 text-[#708499] hover:text-white rounded-2xl font-bold flex items-center justify-center gap-2 hover:bg-white/10 transition-all active:scale-98 border border-white/5 text-xs"
                  >
                    <LogOut size={16}/> خروج از حساب کاربری
@@ -639,7 +644,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ user, onClose, onUpdateUs
                       <button
                         key={t.id}
                         onClick={() => {
-                          const updated = { ...user, theme: t.id as any };
+                          const updated = { ...user, theme: t.id as User['theme'] };
                           onUpdateUser(updated);
                           document.body.className = `${t.id}-theme`;
                           localStorage.setItem('starly_theme', t.id);
@@ -726,13 +731,42 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ user, onClose, onUpdateUs
                         key={f.size}
                         onClick={() => {
                           setFontSize(f.size);
-                          localStorage.setItem('starchat_font_size', f.size);
+                          writePreference(PREFERENCE_KEYS.fontSize, f.size);
+                          applyAppearancePreferences();
                         }}
                         className={`p-3 rounded-xl border text-xs font-bold transition-all text-center ${
                           fontSize === f.size ? 'border-[#3390ec] bg-[#3390ec]/15 text-white' : 'border-white/5 bg-[#242f3d] text-[#708499] hover:text-white'
                         }`}
                       >
                         {f.label}
+                      </button>
+                    ))}
+                  </div>
+               </section>
+
+               {/* Message bubble shape */}
+               <section className="space-y-3">
+                  <h4 className="text-[#3390ec] font-bold text-xs uppercase tracking-widest px-1">گردی حباب پیام</h4>
+                  <div className="grid grid-cols-4 gap-2">
+                    {[
+                      { radius: '0.5rem', label: 'کم' },
+                      { radius: '1rem', label: 'معمولی' },
+                      { radius: '1.5rem', label: 'زیاد' },
+                      { radius: '9999px', label: 'گرد' }
+                    ].map(option => (
+                      <button
+                        key={option.radius}
+                        onClick={() => {
+                          setBubbleRoundness(option.radius);
+                          writePreference(PREFERENCE_KEYS.bubbleRoundness, option.radius);
+                          applyAppearancePreferences();
+                        }}
+                        className={`p-2 rounded-xl border text-[11px] font-bold transition-all ${
+                          bubbleRoundness === option.radius ? 'border-[#3390ec] bg-[#3390ec]/15 text-white' : 'border-white/5 bg-[#242f3d] text-[#708499] hover:text-white'
+                        }`}
+                      >
+                        <span className="block w-7 h-5 bg-[#3390ec] mx-auto mb-1" style={{ borderRadius: option.radius }} />
+                        {option.label}
                       </button>
                     ))}
                   </div>
@@ -857,7 +891,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ user, onClose, onUpdateUs
                       onClick={() => {
                         const next = !autoDownloadPhotos;
                         setAutoDownloadPhotos(next);
-                        localStorage.setItem('starchat_auto_photos', next ? 'true' : 'false');
+                        writePreference(PREFERENCE_KEYS.autoDownloadPhotos, next ? 'true' : 'false');
                       }}
                       className={`w-11 h-6 rounded-full transition-colors relative ${
                         autoDownloadPhotos ? 'bg-[#3390ec]' : 'bg-white/10'
@@ -875,7 +909,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ user, onClose, onUpdateUs
                       onClick={() => {
                         const next = !autoDownloadVoice;
                         setAutoDownloadVoice(next);
-                        localStorage.setItem('starchat_auto_voice', next ? 'true' : 'false');
+                        writePreference(PREFERENCE_KEYS.autoDownloadVoice, next ? 'true' : 'false');
                       }}
                       className={`w-11 h-6 rounded-full transition-colors relative ${
                         autoDownloadVoice ? 'bg-[#3390ec]' : 'bg-white/10'
@@ -905,7 +939,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ user, onClose, onUpdateUs
                       onClick={() => {
                         const next = !sendOnEnter;
                         setSendOnEnter(next);
-                        localStorage.setItem('starchat_send_on_enter', next ? 'true' : 'false');
+                        writePreference(PREFERENCE_KEYS.sendOnEnter, next ? 'true' : 'false');
                       }}
                       className={`w-11 h-6 rounded-full transition-colors relative shrink-0 ${
                         sendOnEnter ? 'bg-[#3390ec]' : 'bg-white/10'
@@ -926,7 +960,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ user, onClose, onUpdateUs
                       onClick={() => {
                         const next = !autoScroll;
                         setAutoScroll(next);
-                        localStorage.setItem('starchat_auto_scroll', next ? 'true' : 'false');
+                        writePreference(PREFERENCE_KEYS.autoScroll, next ? 'true' : 'false');
                       }}
                       className={`w-11 h-6 rounded-full transition-colors relative shrink-0 ${
                         autoScroll ? 'bg-[#3390ec]' : 'bg-white/10'

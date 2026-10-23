@@ -11,7 +11,7 @@ export const WALLPAPER_PRESETS: WallpaperPreset[] = [
     name: 'الگوی تلگرام (کلاسیک)',
     previewClass: 'bg-[#0f1721]',
     style: {
-      backgroundColor: '#0f1721',
+      backgroundColor: 'var(--tg-bg, #0f1721)',
       backgroundImage: `radial-gradient(circle at 25px 25px, rgba(255, 255, 255, 0.04) 2%, transparent 0%), radial-gradient(circle at 75px 75px, rgba(255, 255, 255, 0.04) 2%, transparent 0%)`,
       backgroundSize: '100px 100px'
     }
@@ -95,7 +95,7 @@ export function resolveWallpaperStyle(wallpaper?: string): React.CSSProperties {
       backgroundSize: 'cover',
       backgroundPosition: 'center',
       backgroundRepeat: 'no-repeat',
-      backgroundColor: '#0e1621'
+      backgroundColor: 'var(--tg-bg, #0e1621)'
     };
   }
 

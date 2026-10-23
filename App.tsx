@@ -15,6 +15,7 @@ import { Lock, Send, Bell, Sparkles } from 'lucide-react';
 import { db, collection, query, where, onSnapshot, doc, updateDoc, setDoc, getDoc, getDocs, deleteDoc, arrayUnion, startSync, stopSync } from './services/database';
 import { authApi, getToken } from './services/auth';
 import { playNotificationSound, sendDesktopNotification, updateTabTitle } from './services/notificationService';
+import { applyAppearancePreferences, PREFERENCE_KEYS, readBooleanPreference } from './services/appPreferences';
 
 const AI_BOT: User = {
   id: 'ai-assistant',
@@ -33,6 +34,10 @@ const SAVED_MESSAGES_ID = 'saved-messages';
 
 const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+
+  useEffect(() => {
+    applyAppearancePreferences();
+  }, []);
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const [chats, setChats] = useState<Chat[]>([]);
   const [isTyping, setIsTyping] = useState(false);
@@ -166,13 +171,15 @@ const App: React.FC = () => {
       lastKnownMsgTimeRef.current = newestIncoming.msg.timestamp;
       const isMuted = newestIncoming.chat.isMuted;
       if (!isMuted) {
-        playNotificationSound();
+        if (readBooleanPreference(PREFERENCE_KEYS.soundEnabled)) playNotificationSound();
         const chatTitle = newestIncoming.chat.type === 'private'
           ? (newestIncoming.chat.participants.find((p: User) => p.id === newestIncoming.msg.senderId)?.displayName || 'پیام جدید')
           : (newestIncoming.chat.groupName || 'گروه');
         
         sendDesktopNotification(chatTitle, {
-          body: newestIncoming.msg.text || (newestIncoming.msg.imageUrl ? 'تصویر' : 'رسانه جدید'),
+          body: readBooleanPreference(PREFERENCE_KEYS.previewTextEnabled)
+            ? (newestIncoming.msg.text || (newestIncoming.msg.imageUrl ? 'تصویر' : 'رسانه جدید'))
+            : 'پیام جدید',
           onClick: () => setActiveChatId(newestIncoming.chat.id)
         });
 
