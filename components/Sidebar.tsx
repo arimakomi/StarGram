@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { User, Chat, FolderType, DEFAULT_AVATAR, Story, SystemConfig } from '../types';
 import { 
-  Menu, Search, LogOut, Bookmark, Users, Settings, Megaphone, Plus, X, 
+  Menu, Search, Download, Smartphone, LogOut, Bookmark, Users, Settings, Megaphone, Plus, X, 
   ChevronLeft, Image as ImageIcon, MessageCircle, Lock, Globe, Check, UserPlus, 
   Trash, UserCheck, Camera, Phone, UserX, Pin, PinOff, Bell, BellOff, 
   Archive, ArchiveRestore, CheckCheck, RotateCcw, ChevronDown, ChevronUp,
@@ -40,6 +40,19 @@ interface SidebarProps {
   onOpenAdminPanel: () => void;
 }
 
+
+// Helper to compute exact unseen messages for currentUser
+const getChatUnseenCount = (chat: Chat, currentUserId: string): number => {
+  const clearTime = chat.clearedAt?.[currentUserId] || 0;
+  const count = (chat.messages || []).filter(m => 
+    m.senderId !== currentUserId &&
+    m.timestamp > clearTime &&
+    !(m.seenBy && m.seenBy.some(s => s.userId === currentUserId)) &&
+    !m.isRead
+  ).length;
+  return count > 0 ? count : (chat.unreadCount > 0 ? chat.unreadCount : 0);
+};
+
 const Sidebar: React.FC<SidebarProps> = ({ 
   chats, activeChatId, setActiveChatId, currentUser, activeFolder, setActiveFolder, 
   onOpenSettings, onLogout, onStartChat, onCreateGroup, onCreateChannel, onToggleContact,
@@ -69,6 +82,78 @@ const Sidebar: React.FC<SidebarProps> = ({
   const [isPublicGroup, setIsPublicGroup] = useState(false);
   const [publicHandle, setPublicHandle] = useState('');
   const [groupAvatar, setGroupAvatar] = useState<string>('');
+  // PWA detection & Install Prompt State
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [isPWA, setIsPWA] = useState<boolean>(() => {
+    try {
+      return window.matchMedia('(display-mode: standalone)').matches ||
+        (window.navigator as any).standalone === true ||
+        document.referrer.includes('android-app://');
+    } catch {
+      return false;
+    }
+  });
+  const [showPwaGuideModal, setShowPwaGuideModal] = useState(false);
+
+  useEffect(() => {
+    const handleBeforeInstall = (e: Event) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    };
+    const handleAppInstalled = () => {
+      setIsPWA(true);
+      setDeferredPrompt(null);
+    };
+    window.addEventListener('beforeinstallprompt', handleBeforeInstall);
+    window.addEventListener('appinstalled', handleAppInstalled);
+
+    const mql = window.matchMedia('(display-mode: standalone)');
+    const handleMql = (e: MediaQueryListEvent) => {
+      setIsPWA(e.matches);
+    };
+    mql.addEventListener('change', handleMql);
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
+      window.removeEventListener('appinstalled', handleAppInstalled);
+      mql.removeEventListener('change', handleMql);
+    };
+  }, []);
+
+  const handleInstallPWA = async () => {
+    setShowDrawer(false);
+    if (deferredPrompt) {
+      try {
+        deferredPrompt.prompt();
+        const choice = await deferredPrompt.userChoice;
+        if (choice && choice.outcome === 'accepted') {
+          setIsPWA(true);
+        }
+        setDeferredPrompt(null);
+      } catch {
+        setShowPwaGuideModal(true);
+      }
+    } else {
+      setShowPwaGuideModal(true);
+    }
+  };
+
+  // ESC Key listener for Sidebar inner modals
+  useEffect(() => {
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (showPwaGuideModal) { setShowPwaGuideModal(false); return; }
+        if (showDrawer) { setShowDrawer(false); return; }
+        if (showContactsModal) { setShowContactsModal(false); return; }
+        if (showCreateModal) { setShowCreateModal(null); return; }
+        if (confirmModal) { setConfirmModal(null); return; }
+        if (chatContextMenu) { setChatContextMenu(null); return; }
+      }
+    };
+    window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, [showPwaGuideModal, showDrawer, showContactsModal, showCreateModal, confirmModal, chatContextMenu]);
+
   const [selectedMembers, setSelectedMembers] = useState<User[]>([]);
 
   // Contacts state
@@ -308,13 +393,11 @@ const Sidebar: React.FC<SidebarProps> = ({
     u.username.toLowerCase().includes(contactSearchQuery.toLowerCase())
   );
 
-  // Search non-contact users to add
-  const nonContactUsers = allUsersList.filter(u => 
-    !userContactIds.includes(u.id) && (
-      u.displayName.toLowerCase().includes(contactSearchQuery.toLowerCase()) ||
-      u.username.toLowerCase().includes(contactSearchQuery.toLowerCase())
-    )
-  );
+  // Exact username lookup for adding new contacts (strictly by exact username/ID)
+  const cleanTargetUsername = contactSearchQuery.trim().toLowerCase().replace(/^@/, '');
+  const exactMatchedUser = (cleanTargetUsername.length >= 2)
+    ? allUsersList.find(u => u.username.toLowerCase() === cleanTargetUsername && u.id !== currentUser.id)
+    : null;
 
   return (
     <div className="flex flex-col h-full w-full bg-[#17212b] border-l border-black/20 relative select-none">
@@ -490,7 +573,9 @@ const Sidebar: React.FC<SidebarProps> = ({
                       const other = chat.participants.find(p => p.id !== currentUser.id);
                       const title = chat.type === 'private' ? (other?.displayName || 'کاربر') : (chat.type === 'saved' ? 'پیام‌های ذخیره شده' : chat.groupName);
                       const avatar = chat.type === 'private' ? other?.avatar : chat.groupAvatar;
-                      const lastMsg = chat.lastMessage;
+                      const clearTime = chat.clearedAt?.[currentUser.id] || 0;
+              const visibleMsgs = (chat.messages || []).filter(m => m.timestamp > clearTime);
+              const lastMsg = visibleMsgs.length > 0 ? visibleMsgs[visibleMsgs.length - 1] : (chat.lastMessage && chat.lastMessage.timestamp > clearTime ? chat.lastMessage : undefined);
                       const isSelected = activeChatId === chat.id;
                       const hasReactions = Boolean(
                         chat.messages?.some(m => Array.isArray(m.reactions) && m.reactions.length > 0 && m.reactions.some(r => r.count > 0)) ||
@@ -559,16 +644,20 @@ const Sidebar: React.FC<SidebarProps> = ({
                                     <Heart size={13} className="text-rose-500 fill-rose-500 drop-shadow-[0_0_5px_rgba(244,63,94,0.4)]" />
                                   </span>
                                 )}
-                                {chat.unreadCount > 0 && (
-                                  <div 
-                                    className={`px-2 py-0.5 min-w-[20px] h-[20px] rounded-full text-[10.5px] flex items-center justify-center font-bold tabular-nums shadow-sm transition-all duration-200 animate-in zoom-in-75 ${
-                                      isSelected ? 'bg-white text-[#3390ec]' : 'bg-[#3390ec] text-white shadow-[#3390ec]/30'
-                                    }`}
-                                    title={`${chat.unreadCount} پیام جدید`}
-                                  >
-                                    {chat.unreadCount > 99 ? '+99' : chat.unreadCount}
-                                  </div>
-                                )}
+                                {(() => {
+                                  const badgeCount = getChatUnseenCount(chat, currentUser.id);
+                                  if (badgeCount <= 0) return null;
+                                  return (
+                                    <div 
+                                      className={`px-2 py-0.5 min-w-[20px] h-[20px] rounded-full text-[10.5px] flex items-center justify-center font-bold tabular-nums shadow-sm transition-all duration-200 animate-in zoom-in-75 ${
+                                        isSelected ? 'bg-white text-[#3390ec]' : 'bg-[#3390ec] text-white shadow-[#3390ec]/30'
+                                      }`}
+                                      title={`${badgeCount} پیام خوانده‌نشده جدید`}
+                                    >
+                                      {badgeCount > 99 ? '+99' : badgeCount}
+                                    </div>
+                                  );
+                                })()}
                               </div>
                             </div>
                           </div>
@@ -654,16 +743,20 @@ const Sidebar: React.FC<SidebarProps> = ({
                             <Heart size={13} className="text-rose-500 fill-rose-500 drop-shadow-[0_0_5px_rgba(244,63,94,0.4)]" />
                           </span>
                         )}
-                        {chat.unreadCount > 0 && (
-                          <div 
-                            className={`px-2 py-0.5 min-w-[20px] h-[20px] rounded-full text-[10.5px] flex items-center justify-center font-bold tabular-nums shadow-sm transition-all duration-200 animate-in zoom-in-75 ${
-                              isSelected ? 'bg-white text-[#3390ec]' : 'bg-[#3390ec] text-white shadow-[#3390ec]/30'
-                            }`}
-                            title={`${chat.unreadCount} پیام جدید`}
-                          >
-                            {chat.unreadCount > 99 ? '+99' : chat.unreadCount}
-                          </div>
-                        )}
+                        {(() => {
+                          const badgeCount = getChatUnseenCount(chat, currentUser.id);
+                          if (badgeCount <= 0) return null;
+                          return (
+                            <div 
+                              className={`px-2 py-0.5 min-w-[20px] h-[20px] rounded-full text-[10.5px] flex items-center justify-center font-bold tabular-nums shadow-sm transition-all duration-200 animate-in zoom-in-75 ${
+                                isSelected ? 'bg-white text-[#3390ec]' : 'bg-[#3390ec] text-white shadow-[#3390ec]/30'
+                              }`}
+                              title={`${badgeCount} پیام خوانده‌نشده جدید`}
+                            >
+                              {badgeCount > 99 ? '+99' : badgeCount}
+                            </div>
+                          );
+                        })()}
                       </div>
                     </div>
                   </div>
@@ -824,6 +917,23 @@ const Sidebar: React.FC<SidebarProps> = ({
                   </button>
                 )}
 
+                
+                {/* PWA Install Button (Hidden when inside standalone PWA) */}
+                {!isPWA && (
+                  <button 
+                    onClick={handleInstallPWA}
+                    className="w-full p-3 flex items-center justify-between text-white bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 rounded-xl transition-all active:scale-[0.98] text-sm group my-1"
+                  >
+                    <div className="flex items-center gap-3">
+                      <Download size={19} className="text-emerald-400 group-hover:scale-110 transition-transform"/> 
+                      <span className="font-bold text-emerald-200">نصب اپلیکیشن (PWA)</span>
+                    </div>
+                    <span className="text-[10px] bg-emerald-500/30 text-emerald-300 px-2 py-0.5 rounded-full font-semibold">
+                      وب‌اپ
+                    </span>
+                  </button>
+                )}
+
                 <button 
                   onClick={() => { onOpenSettings(); setShowDrawer(false); }} 
                   className="w-full p-3 flex items-center gap-3.5 text-white hover:bg-white/5 rounded-xl transition-all active:scale-[0.98] text-sm group"
@@ -908,7 +1018,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                             onError={(e) => { e.currentTarget.src = DEFAULT_AVATAR; }}
                             className="w-10 h-10 rounded-full object-cover bg-[#242f3d]"
                           />
-                          {u.status === 'online' && <div className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 rounded-full border-2 border-[#17212b]"/>}
+                          {getUserPresence(u).isOnline && <div className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 rounded-full border-2 border-[#17212b]"/>}
                         </div>
                         <div className="min-w-0 flex-1">
                           <h4 className="font-bold text-xs text-white truncate">{u.displayName}</h4>
@@ -949,42 +1059,86 @@ const Sidebar: React.FC<SidebarProps> = ({
                   )}
                 </>
               ) : (
-                // Add new contacts search
-                <>
-                  <div className="text-[10px] text-[#708499] px-1 mb-2 font-bold">
-                    کاربران ثبت‌نام شده در سایت برای افزودن به لیست شما:
+                // Add new contact by EXACT ID / USERNAME ONLY
+                <div className="py-2 space-y-4">
+                  <div className="p-3 bg-[#242f3d]/60 rounded-xl border border-white/5 space-y-1">
+                    <p className="text-xs font-bold text-white flex items-center gap-1.5">
+                      <Shield size={14} className="text-[#3390ec]" />
+                      افزودن با شناسه کاربری (آیدی دقیق)
+                    </p>
+                    <p className="text-[11px] text-[#708499] leading-relaxed">
+                      برای حفظ حریم خصوصی کاربران، فهرست کلی مخاطبان نمایش داده نمی‌شود. لطفاً آیدی دقیق مخاطب مورد نظر خود را در کادر جستجو وارد کنید.
+                    </p>
                   </div>
-                  {nonContactUsers.map(u => (
-                    <div 
-                      key={u.id}
-                      className="flex items-center justify-between p-2.5 hover:bg-white/5 rounded-xl transition-colors"
-                    >
-                      <div className="flex items-center gap-3 min-w-0 flex-1">
-                        <img src={u.avatar} className="w-10 h-10 rounded-full object-cover bg-[#242f3d]"/>
+
+                  {exactMatchedUser ? (
+                    // Exact Matched User Card
+                    <div className="p-3 bg-[#242f3d] rounded-2xl border border-[#3390ec]/30 space-y-3 animate-in fade-in">
+                      <div className="flex items-center gap-3">
+                        <div className="relative shrink-0">
+                          <img 
+                            src={exactMatchedUser.avatar || DEFAULT_AVATAR} 
+                            onError={(e) => { e.currentTarget.src = DEFAULT_AVATAR; }}
+                            className="w-12 h-12 rounded-full object-cover bg-[#17212b]"
+                          />
+                          {getUserPresence(exactMatchedUser).isOnline && (
+                            <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-[#242f3d]"/>
+                          )}
+                        </div>
                         <div className="min-w-0 flex-1">
-                          <h4 className="font-bold text-xs text-white truncate">{u.displayName}</h4>
-                          <p className="text-[10px] text-[#708499] truncate">@{u.username}</p>
+                          <h4 className="font-bold text-sm text-white truncate">{exactMatchedUser.displayName}</h4>
+                          <p className="text-xs text-[#3390ec] font-mono truncate" dir="ltr">@{exactMatchedUser.username}</p>
+                          {exactMatchedUser.bio && (
+                            <p className="text-[11px] text-[#708499] truncate mt-0.5">{exactMatchedUser.bio}</p>
+                          )}
                         </div>
                       </div>
 
-                      {onToggleContact && (
+                      <div className="flex items-center gap-2 pt-1 border-t border-white/5">
+                        {userContactIds.includes(exactMatchedUser.id) ? (
+                          <div className="flex-1 py-2 text-center text-xs font-bold text-emerald-400 bg-emerald-500/10 rounded-xl">
+                            ✓ در مخاطبین شما وجود دارد
+                          </div>
+                        ) : (
+                          onToggleContact && (
+                            <button 
+                              onClick={() => onToggleContact(exactMatchedUser)}
+                              className="flex-1 py-2 bg-[#3390ec] hover:bg-[#2881d9] text-white rounded-xl text-xs font-bold transition-all active:scale-95 flex items-center justify-center gap-1.5 shadow-md shadow-[#3390ec]/20"
+                            >
+                              <UserPlus size={14} /> افزودن به مخاطبین
+                            </button>
+                          )
+                        )}
                         <button 
-                          onClick={() => onToggleContact(u)}
-                          className="flex items-center gap-1.5 px-3 py-1.5 bg-[#3390ec] hover:bg-[#2881d9] text-white rounded-xl text-xs font-bold transition-all active:scale-95 shadow-md shadow-[#3390ec]/20"
+                          onClick={() => { onStartChat(exactMatchedUser); setShowContactsModal(false); }}
+                          className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-bold transition-all"
                         >
-                          <UserPlus size={13}/> افزودن
+                          شروع گفتگو
                         </button>
-                      )}
+                      </div>
                     </div>
-                  ))}
-
-                  {nonContactUsers.length === 0 && (
-                    <div className="text-center text-[#708499] text-xs py-8">
-                      کاربر جدیدی برای افزودن یافت نشد.
+                  ) : cleanTargetUsername.length >= 2 ? (
+                    // Not Found with Exact Search
+                    <div className="text-center py-8 px-4 bg-[#242f3d]/30 rounded-2xl border border-dashed border-white/10 space-y-2">
+                      <div className="w-10 h-10 mx-auto rounded-full bg-red-500/10 text-red-400 flex items-center justify-center">
+                        <X size={20} />
+                      </div>
+                      <p className="text-xs font-bold text-white">کاربری با آیدی «@{cleanTargetUsername}» یافت نشد</p>
+                      <p className="text-[11px] text-[#708499]">لطفاً از املای دقیق آیدی اطمینان حاصل فرمایید.</p>
+                    </div>
+                  ) : (
+                    // Prompt to enter username
+                    <div className="text-center py-10 px-4 text-[#708499] space-y-2">
+                      <div className="w-12 h-12 mx-auto rounded-full bg-white/5 text-[#3390ec] flex items-center justify-center">
+                        <Search size={22} />
+                      </div>
+                      <p className="text-xs font-bold text-white/80">جستجوی کاربر با نام کاربری دقیق</p>
+                      <p className="text-[11px] text-[#708499] max-w-xs mx-auto">
+                        آیدی کاربر مورد نظر را در کادر بالای این پنجره تایپ کنید تا مشخصات او برای افزودن نمایش داده شود.
+                      </p>
                     </div>
                   )}
-                </>
-              )}
+                </div>              )}
             </div>
           </div>
         </div>
@@ -1372,6 +1526,53 @@ const Sidebar: React.FC<SidebarProps> = ({
           </div>
         </div>
       )}
+    
+      {/* PWA Installation Guide Modal */}
+      {showPwaGuideModal && (
+        <div className="fixed inset-0 z-60 bg-black/80 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
+          <div className="w-full max-w-sm bg-[#17212b] rounded-3xl p-5 border border-white/10 shadow-2xl space-y-4 animate-pop text-right" dir="rtl">
+            <div className="flex items-center justify-between border-b border-white/5 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
+                  <Smartphone size={20} />
+                </div>
+                <h4 className="font-bold text-white text-sm">نصب نسخه وب‌اپ (PWA)</h4>
+              </div>
+              <button onClick={() => setShowPwaGuideModal(false)} className="text-[#708499] hover:text-white p-1">
+                <X size={18}/>
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs text-[#708499] leading-relaxed">
+              <p className="text-white font-medium">
+                برای نصب پیام‌رسان استارلی روی دستگاه خود و استفاده بدون نوار مرورگر:
+              </p>
+              <div className="bg-[#242f3d] p-3 rounded-2xl border border-white/5 space-y-2">
+                <div className="flex items-start gap-2">
+                  <span className="w-5 h-5 rounded-full bg-[#3390ec]/20 text-[#3390ec] flex items-center justify-center font-bold text-[11px] shrink-0">۱</span>
+                  <p className="text-white">در کامپیوتر (Chrome یا Edge): روی علامت نصب در سمت راست نوار آدرس کلیک کنید.</p>
+                </div>
+                <div className="flex items-start gap-2">
+                  <span className="w-5 h-5 rounded-full bg-[#3390ec]/20 text-[#3390ec] flex items-center justify-center font-bold text-[11px] shrink-0">۲</span>
+                  <p className="text-white">در گوشی اندروید: منوی سه‌نقطه مرورگر را زده و «Install app» یا «افزودن به صفحه اصلی» را انتخاب کنید.</p>
+                </div>
+                <div className="flex items-start gap-2">
+                  <span className="w-5 h-5 rounded-full bg-[#3390ec]/20 text-[#3390ec] flex items-center justify-center font-bold text-[11px] shrink-0">۳</span>
+                  <p className="text-white">در آیفون (Safari): دکمه Share (اشتراک‌گذاری) را زده و «Add to Home Screen» را بزنید.</p>
+                </div>
+              </div>
+            </div>
+
+            <button
+              onClick={() => setShowPwaGuideModal(false)}
+              className="w-full py-2.5 bg-[#3390ec] hover:bg-[#2b7bc4] text-white text-xs font-bold rounded-xl transition-all"
+            >
+              متوجه شدم
+            </button>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 };

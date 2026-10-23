@@ -399,3 +399,13 @@ export function restoreAllDatabaseCollectionsData(data: Record<string, Record<st
 export function getRawCollectionStore(collectionName: string): Record<string, any> {
   return { ...getCollectionStore(collectionName) };
 }
+
+export function clearAllDatabaseData() {
+  stopSync();
+  memoryStore.clear();
+  synced.clear();
+  sinceMap.clear();
+  for (const cName of SYNC_COLLECTIONS) {
+    notifyCollectionListeners(cName);
+  }
+}

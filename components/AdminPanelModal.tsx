@@ -1,15 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { User, Chat, MessageReport, SystemConfig } from '../types';
 import { 
-  X, Shield, Sliders, Users, Flag, MessageSquare, AlertTriangle, 
+  X, Shield, AlertOctagon, Sliders, Users, Flag, MessageSquare, AlertTriangle, 
   Check, Ban, UserCheck, Key, ShieldOff, Trash2, Lock, Unlock, 
   Search, RefreshCw, Clock, Filter, Eye, EyeOff, Power,
   Database, Download, Upload, HardDrive, FileJson, RotateCcw, CheckCircle2,
   Bot, Sparkles, Globe
 } from 'lucide-react';
+import { getToken } from '../services/auth';
 import { 
   collection, getDocs, doc, setDoc, updateDoc, deleteDoc, db,
-  getAllDatabaseCollectionsData, restoreAllDatabaseCollectionsData, getRawCollectionStore
+  getAllDatabaseCollectionsData, restoreAllDatabaseCollectionsData, getRawCollectionStore, clearAllDatabaseData
 } from '../services/database';
 
 interface AdminPanelModalProps {
@@ -28,6 +29,47 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
   onRefreshData
 }) => {
   const [activeTab, setActiveTab] = useState<'system' | 'reports' | 'users' | 'chats' | 'database'>('system');
+  // Panic Button Wipe state
+  const [showPanicModal, setShowPanicModal] = useState(false);
+  const [panicConfirmInput, setPanicConfirmInput] = useState('');
+  const [isPanicking, setIsPanicking] = useState(false);
+  const [panicError, setPanicError] = useState('');
+
+const handleExecutePanic = async () => {
+    if (panicConfirmInput.trim().toUpperCase() !== 'PANIC') {
+      setPanicError('لطفاً عبارت PANIC را دقیقاً وارد کنید.');
+      return;
+    }
+    setIsPanicking(true);
+    setPanicError('');
+    try {
+      const token = getToken();
+      const res = await fetch('/api/admin/panic', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
+        }
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) {
+        throw new Error(data.message || 'خطا در اجرای عملیات پنیک');
+      }
+
+      clearAllDatabaseData();
+      try {
+        localStorage.clear();
+        sessionStorage.clear();
+      } catch {}
+
+      alert('تمامی داده‌ها و پایگاه‌داده با موفقیت نابود و پاکسازی گردید. سیستم ریست فکتوری شد.');
+      window.location.href = '/';
+    } catch (err: any) {
+      setPanicError(err.message || 'خطا در ارتباط با سرور.');
+      setIsPanicking(false);
+    }
+  };
+
 
   // System Config state
   const [cfg, setCfg] = useState<SystemConfig>(systemConfig);
@@ -58,6 +100,19 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
   const [newPasswordInput, setNewPasswordInput] = useState('');
   const [actionModalType, setActionModalType] = useState<'password' | 'tempBan' | null>(null);
   const [tempBanHours, setTempBanHours] = useState(24);
+
+  // ESC Key Handler
+  useEffect(() => {
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (showPanicModal) { setShowPanicModal(false); return; }
+        if (actionModalType) { setActionModalType(null); return; }
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, [showPanicModal, actionModalType, onClose]);
 
   // Chats state (Groups & Channels)
   const [chatsList, setChatsList] = useState<Chat[]>([]);
@@ -495,12 +550,28 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
               <p className="text-xs text-gray-400">کنترل کلان سیستم، مدیریت کاربران، گروه‌ها و رسیدگی به گزارش‌ها</p>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="p-2 text-gray-400 hover:text-white hover:bg-[#242f3d] rounded-xl transition-colors"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => {
+                setPanicConfirmInput('');
+                setPanicError('');
+                setShowPanicModal(true);
+              }}
+              className="px-3 py-1.5 bg-red-600/20 hover:bg-red-600 text-red-300 hover:text-white border border-red-500/40 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm active:scale-95 group"
+              title="دکمه پنیک: پاکسازی و انهدام اضطراری کل پایگاه‌داده"
+            >
+              <AlertOctagon className="w-4 h-4 text-red-400 group-hover:text-white transition-colors" />
+              <span>دکمه پنیک (Wipe)</span>
+            </button>
+            <button
+              onClick={onClose}
+              className="p-2 text-gray-400 hover:text-white hover:bg-[#242f3d] rounded-xl transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
         </div>
 
         {/* Navigation Tabs */}
@@ -1161,6 +1232,35 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
               </div>
             )}
 
+            
+            {/* Panic Wipe Danger Zone */}
+            <div className="bg-red-500/10 border-2 border-red-500/30 rounded-2xl p-4.5 space-y-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-red-500/20 border border-red-500/40 text-red-400 flex items-center justify-center shrink-0">
+                  <AlertOctagon size={22} className="animate-pulse" />
+                </div>
+                <div className="flex-1">
+                  <div className="flex items-center gap-2">
+                    <h4 className="text-sm font-bold text-red-300">عملیات اضطراری: دکمه پنیک (System Panic & Wipe)</h4>
+                    <span className="text-[10px] bg-red-500/20 text-red-300 border border-red-500/30 px-2 py-0.5 rounded-full font-bold">بحرانی</span>
+                  </div>
+                  <p className="text-xs text-red-300/80 leading-relaxed mt-0.5">
+                    با فشردن این دکمه و تأیید نهایی، تمامی پایگاه‌داده (شامل کل گفتگوها، پیام‌ها، کاربران، فایل‌ها، گزارش‌ها و نشست‌ها) بدون امکان بازگشت نابود و پاکسازی کامل می‌شوند.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  setPanicConfirmInput('');
+                  setPanicError('');
+                  setShowPanicModal(true);
+                }}
+                className="w-full py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold transition-all shadow-md active:scale-98 flex items-center justify-center gap-2"
+              >
+                <AlertOctagon size={16}/> اجرای عملیات پنیک و نابودی کل دیتابیس
+              </button>
+            </div>
+
             {/* Active Database Engine Badge */}
             <div className="flex items-center justify-between p-3.5 bg-[#0e1621] border border-[#242f3d] rounded-xl text-xs">
               <div className="flex items-center gap-2.5">
@@ -1469,6 +1569,63 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
             </div>
           </div>
         )}
+      
+      {/* Panic Confirmation Dialog */}
+      {showPanicModal && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in zoom-in-95">
+          <div className="bg-[#17212b] border-2 border-red-500/50 w-full max-w-md rounded-3xl p-6 shadow-2xl text-center space-y-4">
+            <div className="w-16 h-16 rounded-2xl bg-red-500/20 border-2 border-red-500/40 text-red-400 mx-auto flex items-center justify-center animate-bounce">
+              <AlertOctagon size={36} />
+            </div>
+
+            <div className="space-y-1.5">
+              <h3 className="text-white font-bold text-lg">⚠️ هشدار اضطراری: دکمه پنیک (Panic Wipe)</h3>
+              <p className="text-xs text-red-300/90 leading-relaxed">
+                شما در حال پاکسازی کامل کل پایگاه‌داده سیستم هستید! تمامی کاربران، گفتگوها، پیام‌ها، گزارش‌ها و فایل‌ها بلافاصله و برای همیشه حذف خواهند شد و این عملیات قابل بازگشت نیست.
+              </p>
+            </div>
+
+            <div className="bg-[#242f3d] p-3.5 rounded-2xl border border-white/5 text-right space-y-2">
+              <label className="text-xs text-gray-300 block font-medium">
+                جهت تایید قطعی، عبارت انگلیسی <span className="font-mono text-red-400 font-bold bg-black/40 px-2 py-0.5 rounded">PANIC</span> را با حروف بزرگ وارد نمایید:
+              </label>
+              <input
+                type="text"
+                dir="ltr"
+                placeholder="PANIC"
+                value={panicConfirmInput}
+                onChange={(e) => setPanicConfirmInput(e.target.value)}
+                className="w-full bg-[#17212b] border border-red-500/40 rounded-xl px-4 py-2.5 text-center text-red-300 text-sm font-mono tracking-widest uppercase focus:border-red-500 outline-none"
+              />
+            </div>
+
+            {panicError && (
+              <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 p-2 rounded-xl">
+                {panicError}
+              </p>
+            )}
+
+            <div className="flex gap-2 pt-2">
+              <button
+                onClick={() => setShowPanicModal(false)}
+                disabled={isPanicking}
+                className="flex-1 py-3 rounded-xl bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white text-xs font-bold transition-colors"
+              >
+                انصراف
+              </button>
+              <button
+                onClick={handleExecutePanic}
+                disabled={panicConfirmInput.trim().toUpperCase() !== 'PANIC' || isPanicking}
+                className="flex-1 py-3 rounded-xl bg-red-600 hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-bold transition-all shadow-xl active:scale-95 flex items-center justify-center gap-2"
+              >
+                {isPanicking ? <RefreshCw size={15} className="animate-spin" /> : <AlertOctagon size={15} />}
+                <span>تأیید و انهدام کامل سیستم</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       </div>
     </div>
   );

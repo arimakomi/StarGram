@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e3a5f"/>
+      <stop offset="50%" stop-color="#17212b"/>
+      <stop offset="100%" stop-color="#0e1621"/>
+    </linearGradient>
+    <linearGradient id="accentGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#55a5ff"/>
+      <stop offset="100%" stop-color="#3390ec"/>
+    </linearGradient>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="12" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+  <!-- Background Circle with subtle border -->
+  <rect width="512" height="512" rx="128" fill="url(#bgGrad)"/>
+  <rect width="504" height="504" x="4" y="4" rx="124" fill="none" stroke="#3390ec" stroke-opacity="0.3" stroke-width="4"/>
+  
+  <!-- Glowing Chat Bubble Shape -->
+  <path d="M128 240 C128 168 186 112 256 112 C326 112 384 168 384 240 C384 312 326 368 256 368 C232 368 210 362 190 350 L140 372 C132 376 124 368 126 360 L136 318 C131 306 128 293 128 278 Z" fill="url(#accentGrad)" filter="url(#glow)"/>
+
+  <!-- Crisp Star in center -->
+  <polygon points="256,170 274,216 324,219 284,250 298,298 256,268 214,298 228,250 188,219 238,216" fill="#ffffff" />
+</svg>

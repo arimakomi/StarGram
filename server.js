@@ -164,6 +164,12 @@ class LocalAdapter {
   }
 
   async close() {}
+
+  async panicWipe() {
+    this.docs.clear();
+    this.sessions.clear();
+    this.save();
+  }
 }
 
 class PostgresAdapter {
@@ -264,6 +270,10 @@ class PostgresAdapter {
   async close() {
     await this.pool.end();
   }
+
+  async panicWipe() {
+    await this.pool.query('TRUNCATE TABLE documents, sessions CASCADE');
+  }
 }
 
 class MysqlAdapter {
@@ -358,6 +368,11 @@ class MysqlAdapter {
   async close() {
     await this.pool.end();
   }
+
+  async panicWipe() {
+    await this.pool.query('TRUNCATE TABLE documents');
+    await this.pool.query('TRUNCATE TABLE sessions');
+  }
 }
 
 // ایجاد و اتصال به دیتابیس با فال‌بک خودکار
@@ -424,7 +439,11 @@ async function setupDatabase() {
 const publicUser = (u) => {
   if (!u) return u;
   const { password, passwordHash, ...rest } = u;
-  return rest;
+  const isOnline = rest.status !== 'offline' && Boolean(rest.lastSeen) && (Date.now() - rest.lastSeen <= 65000);
+  return {
+    ...rest,
+    status: isOnline ? 'online' : 'offline',
+  };
 };
 const isAdmin = (u) => !!u && (u.role === 'superadmin' || u.role === 'admin');
 
@@ -594,6 +613,17 @@ app.post('/api/auth/logout', auth, wrap(async (req, res) => {
   }
   await dbAdapter.deleteSession(req.tokenHash);
   res.json({ success: true });
+}));
+
+
+app.post('/api/auth/delete-account', auth, wrap(async (req, res) => {
+  const userId = req.user.id;
+  const now = Date.now();
+  await dbAdapter.deleteDoc('users', userId, now);
+  if (req.tokenHash) {
+    await dbAdapter.deleteSession(req.tokenHash);
+  }
+  res.json({ success: true, message: 'حساب کاربری با موفقیت حذف گردید.' });
 }));
 
 app.post('/api/users/heartbeat', auth, wrap(async (req, res) => {
@@ -775,6 +805,36 @@ app.post('/api/ai/chat', auth, wrap(async (req, res) => {
     console.error('AI Proxy Error:', e);
     res.status(500).json({ success: false, message: `خطا در ارتباط با سرور هوش مصنوعی: ${e.message}` });
   }
+}));
+
+
+// عملیات پنیک و پاکسازی اضطراری کل پایگاه‌داده و سیستم (مخصوص سوپرادمین)
+app.post('/api/admin/panic', auth, wrap(async (req, res) => {
+  if (!isAdmin(req.user) && req.user.role !== 'superadmin') {
+    return res.status(403).json({ success: false, message: 'فقط مدیر سیستم مجاز به اجرای عملیات پنیک است.' });
+  }
+
+  console.warn(`🚨 [PANIC TRIGGERED] Admin ${req.user.username} wiped database at ${new Date().toISOString()}`);
+
+  if (typeof dbAdapter.panicWipe === 'function') {
+    await dbAdapter.panicWipe();
+  }
+
+  try {
+    const dbFile = path.join(__dirname, 'data', 'stargram_db.json');
+    if (fs.existsSync(dbFile)) {
+      fs.writeFileSync(dbFile, JSON.stringify({ docs: [], sessions: [] }, null, 2), 'utf8');
+    }
+  } catch (err) {
+    console.warn('Could not reset local db file:', err.message);
+  }
+
+  await ensureAdmin({ reset: true });
+
+  res.json({
+    success: true,
+    message: 'تمامی اطلاعات و پایگاه‌داده با موفقیت نابود و پاکسازی گردیدند.'
+  });
 }));
 
 // فایل‌های استاتیک

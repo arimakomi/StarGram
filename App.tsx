@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { User, Message, Chat, FolderType, DEFAULT_AVATAR, Story, SystemConfig, MessageReport } from './types';
 import Login from './components/Login';
 import Sidebar from './components/Sidebar';
@@ -111,6 +111,22 @@ const App: React.FC = () => {
     };
   }, [currentUser]);
 
+  // 1.5 Real-time Users Map Sync for live presence & profile hydration
+  const [liveUsersMap, setLiveUsersMap] = useState<Record<string, User>>({});
+
+  useEffect(() => {
+    if (!currentUser) return;
+    const unsub = onSnapshot(collection(db, "users"), (snapshot: any) => {
+      const map: Record<string, User> = {};
+      snapshot.forEach((d: any) => {
+        const u = d.data() as User;
+        map[u.id] = u;
+      });
+      setLiveUsersMap(map);
+    });
+    return () => unsub();
+  }, [currentUser]);
+
   // 2. Real-time Chats Sync
   useEffect(() => {
     if (!currentUser) return;
@@ -199,7 +215,109 @@ const App: React.FC = () => {
     return () => unsubscribe();
   }, []);
 
-  // 4. Real-time System Config Sync
+  // 3.5 Join Link & Invite Token Resolver Hook
+  const [joinTargetChat, setJoinTargetChat] = useState<Chat | null>(null);
+  const [isJoining, setIsJoining] = useState(false);
+  // Account Deletion Handler
+  const handleDeleteAccount = async () => {
+    if (!currentUser) return;
+    try {
+      await authApi.deleteAccount();
+    } catch (e) {
+      console.warn('Delete account error:', e);
+    }
+
+    try {
+      await deleteDoc(doc(db, 'users', currentUser.id));
+    } catch {}
+
+    stopSync();
+    try {
+      localStorage.removeItem('starly_token');
+      localStorage.removeItem('starly_current_user');
+      localStorage.removeItem('starly_session_cloud');
+      sessionStorage.clear();
+    } catch {}
+
+    setCurrentUser(null);
+    setActiveChatId(null);
+    setShowSettings(false);
+    alert('حساب کاربری شما با موفقیت به طور کامل حذف شد.');
+  };
+
+  // Global ESC Key Listener: close open modals or return to main welcome view
+  useEffect(() => {
+    const handleGlobalEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (showSettings) { setShowSettings(false); return; }
+        if (showMyProfile) { setShowMyProfile(false); return; }
+        if (showAdminPanel) { setShowAdminPanel(false); return; }
+        if (viewingStory) { setViewingStory(null); return; }
+        if (showCreateStory) { setShowCreateStory(false); return; }
+        if (reportingMessage) { setReportingMessage(null); return; }
+        if (joinTargetChat) { setJoinTargetChat(null); return; }
+        if (activeChatId) {
+          setActiveChatId(null);
+        }
+      }
+    };
+    window.addEventListener('keydown', handleGlobalEsc);
+    return () => window.removeEventListener('keydown', handleGlobalEsc);
+  }, [showSettings, showMyProfile, showAdminPanel, viewingStory, showCreateStory, reportingMessage, joinTargetChat, activeChatId]);
+
+
+  const resolveJoinFromUrl = useCallback(async () => {
+    if (!currentUser) return;
+    const path = window.location.pathname;
+    const hash = window.location.hash;
+    const search = new URLSearchParams(window.location.search);
+
+    let joinToken: string | null = null;
+    let handle: string | null = null;
+
+    if (path.startsWith('/join/')) {
+      joinToken = decodeURIComponent(path.slice(6)).trim();
+    } else if (path.startsWith('/@')) {
+      handle = decodeURIComponent(path.slice(2)).trim();
+    } else if (hash.includes('/join/')) {
+      joinToken = decodeURIComponent(hash.split('/join/')[1]).trim();
+    } else if (search.get('join')) {
+      joinToken = search.get('join')!.trim();
+    }
+
+    if (!joinToken && !handle) return;
+
+    try {
+      const allChatsSnap = await getDocs(collection(db, "chats"));
+      let target: Chat | null = null;
+      allChatsSnap.forEach((docSnap: any) => {
+        const c = docSnap.data() as Chat;
+        if (handle && c.publicHandle && c.publicHandle.toLowerCase() === handle.toLowerCase()) {
+          target = c;
+        } else if (joinToken) {
+          if (c.inviteLink && c.inviteLink.includes(joinToken)) {
+            target = c;
+          } else if (c.id.endsWith(joinToken) || c.id.includes(joinToken)) {
+            target = c;
+          }
+        }
+      });
+
+      if (target) {
+        setJoinTargetChat(target);
+      }
+    } catch (err) {
+      console.error('Error resolving join link:', err);
+    }
+  }, [currentUser]);
+
+  useEffect(() => {
+    resolveJoinFromUrl();
+    window.addEventListener('popstate', resolveJoinFromUrl);
+    return () => window.removeEventListener('popstate', resolveJoinFromUrl);
+  }, [resolveJoinFromUrl]);
+
+    // 4. Real-time System Config Sync
   useEffect(() => {
     const q = collection(db, "system_config");
     const unsubscribe = onSnapshot(q, (snapshot: any) => {
@@ -211,6 +329,30 @@ const App: React.FC = () => {
     });
     return () => unsubscribe();
   }, []);
+
+  const handleJoinChat = async (targetChat: Chat) => {
+    if (!currentUser) return;
+    setIsJoining(true);
+    try {
+      const chatRef = doc(db, "chats", targetChat.id);
+      const isAlreadyMember = targetChat.participantIds?.includes(currentUser.id);
+      if (!isAlreadyMember) {
+        await updateDoc(chatRef, {
+          participants: arrayUnion(currentUser),
+          participantIds: arrayUnion(currentUser.id),
+          deletedForUserIds: (targetChat.deletedForUserIds || []).filter(id => id !== currentUser.id)
+        });
+      }
+      setActiveChatId(targetChat.id);
+      setJoinTargetChat(null);
+      window.history.replaceState({}, '', '/');
+    } catch (e) {
+      console.error('Failed to join chat:', e);
+      alert('خطا در پیوستن به گفتگو. لطفاً دوباره تلاش کنید.');
+    } finally {
+      setIsJoining(false);
+    }
+  };
 
   const handleAuth = async (user: User) => {
     setShowEntranceSplash(true);
@@ -298,6 +440,9 @@ const App: React.FC = () => {
             forwardedFrom: payload.forwardedFrom,
             timestamp: Date.now(),
             isRead: false,
+            isEncrypted: payload.isEncrypted,
+            encryptedIv: payload.encryptedIv,
+            encryptedPayload: payload.encryptedPayload,
             seenBy: [{ userId: currentUser.id, seenAt: Date.now() }],
             viewsCount: isChannel ? 1 : undefined,
             viewers: isChannel ? [currentUser.id] : undefined
@@ -306,6 +451,7 @@ const App: React.FC = () => {
           await updateDoc(chatRef, {
             messages: arrayUnion(msg),
             lastMessage: msg,
+            deletedForUserIds: [], // Resets deleted status so chat returns to sidebar for everyone!
             unreadCount: 0
           });
           break;
@@ -438,8 +584,9 @@ const App: React.FC = () => {
           const chatDoc = await getDoc(chatRef);
           if (chatDoc.exists()) {
             const chatData = chatDoc.data() as Chat;
-            const newMessages = chatData.messages.filter(m => m.id !== payload.id);
-            await updateDoc(chatRef, { messages: newMessages });
+            const newMessages = (chatData.messages || []).filter(m => m.id !== payload.id);
+            const newLastMsg = newMessages.length > 0 ? newMessages[newMessages.length - 1] : null;
+            await updateDoc(chatRef, { messages: newMessages, lastMessage: newLastMsg });
           }
           break;
         }
@@ -455,13 +602,80 @@ const App: React.FC = () => {
           });
           break;
 
-        case 'updateChatInfo':
-          await updateDoc(chatRef, {
+        case 'updateChatInfo': {
+          const updateData: any = {
             groupName: payload.groupName,
             description: payload.description,
+            groupAvatar: payload.groupAvatar,
+            isPublic: payload.isPublic,
+            publicHandle: payload.publicHandle,
             slowMode: payload.slowMode
-          });
+          };
+          if (payload.permissions !== undefined) updateData.permissions = payload.permissions;
+          if (payload.reactionsSetting !== undefined) updateData.reactionsSetting = payload.reactionsSetting;
+          if (payload.allowedReactions !== undefined) updateData.allowedReactions = payload.allowedReactions;
+          if (payload.inviteLinksList !== undefined) updateData.inviteLinksList = payload.inviteLinksList;
+          if (payload.recentActions !== undefined) updateData.recentActions = payload.recentActions;
+          if (payload.admins !== undefined) updateData.admins = payload.admins;
+          if (payload.signMessages !== undefined) updateData.signMessages = payload.signMessages;
+          if (payload.showAuthorsProfiles !== undefined) updateData.showAuthorsProfiles = payload.showAuthorsProfiles;
+          if (payload.removedUsersList !== undefined) updateData.removedUsersList = payload.removedUsersList;
+          if (payload.participants !== undefined) updateData.participants = payload.participants;
+          if (payload.participantIds !== undefined) updateData.participantIds = payload.participantIds;
+          await updateDoc(chatRef, updateData);
           break;
+        }
+
+        case 'regenerateInviteLink': {
+          const origin = typeof window !== 'undefined' ? window.location.origin : '';
+          const prefix = chatRef.id.startsWith('ch_') ? 'ch' : 'g';
+          const randomToken = Math.random().toString(36).substring(2, 9);
+          const newLink = `${origin}/join/${prefix}_${randomToken}`;
+          await updateDoc(chatRef, { inviteLink: newLink });
+          break;
+        }
+
+        case 'setAdminPermissions': {
+          const chatDoc = await getDoc(chatRef);
+          if (chatDoc.exists()) {
+            const cData = chatDoc.data() as Chat;
+            const currentAdmins = cData.admins || {};
+            const updatedAdmins = {
+              ...currentAdmins,
+              [payload.userId]: payload.permissions
+            };
+            await updateDoc(chatRef, { admins: updatedAdmins });
+          }
+          break;
+        }
+
+        case 'removeAdmin': {
+          const chatDoc = await getDoc(chatRef);
+          if (chatDoc.exists()) {
+            const cData = chatDoc.data() as Chat;
+            const currentAdmins = { ...(cData.admins || {}) };
+            delete currentAdmins[payload.userId];
+            await updateDoc(chatRef, { admins: currentAdmins });
+          }
+          break;
+        }
+
+        case 'kickMember': {
+          const chatDoc = await getDoc(chatRef);
+          if (chatDoc.exists()) {
+            const cData = chatDoc.data() as Chat;
+            const newParticipants = (cData.participants || []).filter(p => p.id !== payload.userId);
+            const newParticipantIds = (cData.participantIds || []).filter(id => id !== payload.userId);
+            const currentAdmins = { ...(cData.admins || {}) };
+            delete currentAdmins[payload.userId];
+            await updateDoc(chatRef, {
+              participants: newParticipants,
+              participantIds: newParticipantIds,
+              admins: currentAdmins
+            });
+          }
+          break;
+        }
 
         case 'updateSettings':
           await updateDoc(chatRef, payload);
@@ -501,6 +715,7 @@ const App: React.FC = () => {
             await updateDoc(tRef, {
               messages: arrayUnion(fwdMsg),
               lastMessage: fwdMsg,
+              deletedForUserIds: [], // Resets deleted status so chat returns to sidebar!
               unreadCount: 0
             });
           }
@@ -565,20 +780,36 @@ const App: React.FC = () => {
   };
 
   const handleClearChatHistory = async (chatId: string) => {
+    if (!currentUser) return;
+    const targetChat = chats.find(c => c.id === chatId);
     const chatRef = doc(db, "chats", chatId);
-    await updateDoc(chatRef, { messages: [], lastMessage: null });
+    const now = Date.now();
+    const updatedClearedAt = { ...(targetChat?.clearedAt || {}), [currentUser.id]: now };
+    await updateDoc(chatRef, { 
+      clearedAt: updatedClearedAt
+    });
   };
 
   const handleDeleteChat = async (chatId: string, deleteForBoth: boolean) => {
     if (!currentUser) return;
     const targetChat = chats.find(c => c.id === chatId);
     const chatRef = doc(db, "chats", chatId);
+    const now = Date.now();
     if (deleteForBoth && targetChat) {
+      // Clear all history completely for both sides and mark as deleted
       await updateDoc(chatRef, { 
+        messages: [],
+        lastMessage: null,
+        pinnedMessageIds: [],
+        unreadCount: 0,
+        clearedAt: {},
         deletedForUserIds: arrayUnion(currentUser.id, ...(targetChat.participantIds || [])) 
       });
     } else {
+      // Delete for current user only: record clearedAt so old history is permanently hidden for them
+      const updatedClearedAt = { ...(targetChat?.clearedAt || {}), [currentUser.id]: now };
       await updateDoc(chatRef, { 
+        clearedAt: updatedClearedAt,
         deletedForUserIds: arrayUnion(currentUser.id) 
       });
     }
@@ -638,12 +869,19 @@ const App: React.FC = () => {
       finally { setIsTyping(false); }
   };
 
+  const hydratedChats: Chat[] = useMemo(() => {
+    return chats.map((c: Chat) => ({
+      ...c,
+      participants: (c.participants || []).map((p: User) => liveUsersMap[p.id] ? { ...p, ...liveUsersMap[p.id] } : p)
+    }));
+  }, [chats, liveUsersMap]);
+
   const getActiveChat = () => {
     if (!activeChatId || !currentUser) return null;
     if (activeChatId === AI_BOT.id) {
-       return chats.find(c => c.id === AI_BOT.id) || { id: AI_BOT.id, type: 'bot', participants: [currentUser, AI_BOT], messages: [], pinnedMessageIds: [], unreadCount: 0 } as Chat;
+       return hydratedChats.find((c: Chat) => c.id === AI_BOT.id) || { id: AI_BOT.id, type: 'bot', participants: [currentUser, AI_BOT], messages: [], pinnedMessageIds: [], unreadCount: 0 } as Chat;
     }
-    return chats.find(c => c.id === activeChatId) || null;
+    return hydratedChats.find((c: Chat) => c.id === activeChatId) || null;
   };
 
   if (booting) return <div className="min-h-screen bg-[#0e1621] flex items-center justify-center text-[#8b98a5] font-['Vazirmatn']" dir="rtl">در حال بارگذاری…</div>;
@@ -697,7 +935,7 @@ const App: React.FC = () => {
         
         <div className={`w-full md:w-[380px] lg:w-[420px] flex-shrink-0 h-full border-l border-black/20 ${activeChatId ? 'hidden md:flex' : 'flex'}`}>
           <Sidebar 
-            chats={chats} activeChatId={activeChatId} setActiveChatId={setActiveChatId} 
+            chats={hydratedChats} activeChatId={activeChatId} setActiveChatId={setActiveChatId} 
             currentUser={currentUser} activeFolder={activeFolder} setActiveFolder={setActiveFolder}
             stories={stories}
             onOpenCreateStory={() => setShowCreateStory(true)}
@@ -719,13 +957,18 @@ const App: React.FC = () => {
               if (u.id === AI_BOT.id) { setActiveChatId(AI_BOT.id); return; }
               const existing = chats.find(c => c.type === 'private' && c.participantIds?.includes(u.id));
               if (existing) {
+                if (existing.deletedForUserIds?.includes(currentUser.id)) {
+                  const updatedDeleted = (existing.deletedForUserIds || []).filter(id => id !== currentUser.id);
+                  await updateDoc(doc(db, "chats", existing.id), { deletedForUserIds: updatedDeleted });
+                }
                 setActiveChatId(existing.id);
               } else {
                 const newChat: Chat = { 
                   id: `c_${Date.now()}`, type: 'private', 
                   participants: [currentUser, u], 
                   participantIds: [currentUser.id, u.id],
-                  messages: [], pinnedMessageIds: [], unreadCount: 0 
+                  messages: [], pinnedMessageIds: [], unreadCount: 0,
+                  deletedForUserIds: []
                 };
                 await createChatInFirestore(newChat);
                 setActiveChatId(newChat.id);
@@ -749,8 +992,8 @@ const App: React.FC = () => {
                 publicHandle: cleanHandle || undefined,
                 groupAvatar: avatar || generateLocalAvatarSvg(name, id),
                 inviteLink: isPublic && cleanHandle
-                  ? `https://chat.starly.ir/@${cleanHandle}`
-                  : `https://chat.starly.ir/join/${id.substring(2)}`
+                  ? `${typeof window !== 'undefined' ? window.location.origin : ''}/@${cleanHandle}`
+                  : `${typeof window !== 'undefined' ? window.location.origin : ''}/join/${id.substring(2)}`
               };
               await createChatInFirestore(newChat);
               setActiveChatId(id);
@@ -769,7 +1012,7 @@ const App: React.FC = () => {
                 messages: [], pinnedMessageIds: [], 
                 unreadCount: 0, adminId: currentUser.id,
                 groupAvatar: avatar || generateLocalAvatarSvg(name, id),
-                inviteLink: `https://chat.starly.ir/join/${id.substring(3)}`
+                inviteLink: `${typeof window !== 'undefined' ? window.location.origin : ''}/join/${id.substring(3)}`
               };
               await createChatInFirestore(newChat);
               setActiveChatId(id);
@@ -780,7 +1023,7 @@ const App: React.FC = () => {
         <div className={`flex-1 h-full w-full ${!activeChatId ? 'hidden md:flex' : 'flex'}`}>
            <ChatArea 
             chat={getActiveChat()} currentUser={currentUser} isTyping={isTyping} 
-            chats={chats}
+            chats={hydratedChats}
             onOpenSavedMessages={handleOpenSavedMessages}
             onAction={handleMessageAction}
             onDeleteChat={() => setActiveChatId(null)}
@@ -796,6 +1039,7 @@ const App: React.FC = () => {
       {showSettings && (
         <SettingsModal 
           user={currentUser} onClose={() => setShowSettings(false)} 
+          onDeleteAccount={handleDeleteAccount} 
           onUpdateUser={async (updated) => {
              setCurrentUser(updated);
              const userRef = doc(db, "users", updated.id);
@@ -873,17 +1117,73 @@ const App: React.FC = () => {
         />
       )}
 
+      {/* Join Group/Channel Preview Modal */}
+      {joinTargetChat && (
+        <div 
+          className="fixed inset-0 z-[1000] bg-black/80 flex items-center justify-center p-4 backdrop-blur-xs animate-in fade-in"
+          onClick={() => { setJoinTargetChat(null); window.history.replaceState({}, '', '/'); }}
+        >
+          <div 
+            className="w-full max-w-sm bg-[#17212b] border border-white/10 rounded-3xl p-6 shadow-2xl flex flex-col items-center text-center space-y-5 animate-pop"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="relative">
+              <img 
+                src={joinTargetChat.groupAvatar || DEFAULT_AVATAR} 
+                onError={(e) => { e.currentTarget.src = DEFAULT_AVATAR; }}
+                className="w-24 h-24 rounded-full object-cover border-4 border-[#3390ec]/30 shadow-xl bg-[#242f3d]" 
+              />
+              <span className="absolute bottom-1 right-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-[#3390ec] text-white shadow-md">
+                {joinTargetChat.type === 'channel' ? 'کانال' : 'گروه'}
+              </span>
+            </div>
+
+            <div className="space-y-1">
+              <h3 className="font-bold text-white text-lg">{joinTargetChat.groupName}</h3>
+              {joinTargetChat.publicHandle && (
+                <p className="text-xs text-[#3390ec] font-mono" dir="ltr">@{joinTargetChat.publicHandle}</p>
+              )}
+              <p className="text-xs text-[#708499]">
+                {joinTargetChat.participantIds?.length || joinTargetChat.participants?.length || 1} {joinTargetChat.type === 'channel' ? 'مشترک' : 'عضو'}
+              </p>
+            </div>
+
+            {joinTargetChat.description && (
+              <p className="text-xs text-white/80 p-3 bg-black/20 rounded-2xl leading-relaxed max-h-28 overflow-y-auto custom-scrollbar w-full text-right">
+                {joinTargetChat.description}
+              </p>
+            )}
+
+            <div className="flex gap-2 w-full pt-2">
+              <button 
+                onClick={() => { setJoinTargetChat(null); window.history.replaceState({}, '', '/'); }}
+                className="flex-1 py-3 bg-white/5 hover:bg-white/10 text-[#708499] hover:text-white rounded-2xl text-xs font-bold transition-all"
+              >
+                انصراف
+              </button>
+              <button 
+                onClick={() => handleJoinChat(joinTargetChat)}
+                disabled={isJoining}
+                className="flex-[2] py-3 bg-[#3390ec] hover:bg-[#2881d9] text-white rounded-2xl text-xs font-bold transition-all shadow-lg shadow-[#3390ec]/25 active:scale-95 disabled:opacity-50"
+              >
+                {joinTargetChat.participantIds?.includes(currentUser?.id || '') ? 'مشاهده گفتگو' : (joinTargetChat.type === 'channel' ? 'عضویت در کانال' : 'پیوستن به گروه')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Message Report Modal */}
       {reportingMessage && (
         <ReportModal
           message={reportingMessage}
-          reportedUser={getActiveChat()?.participants.find(p => p.id === reportingMessage.senderId)}
+          reportedUser={getActiveChat()?.participants.find((p: User) => p.id === reportingMessage.senderId)}
           chatId={activeChatId || ''}
           reporter={currentUser}
           onClose={() => setReportingMessage(null)}
           onSubmitReport={async (reason) => {
             const activeChat = getActiveChat();
-            const reportedUser = activeChat?.participants.find(p => p.id === reportingMessage.senderId);
+            const reportedUser = activeChat?.participants.find((p: User) => p.id === reportingMessage.senderId);
             const reportId = `rep_${Date.now()}`;
             const newReport: MessageReport = {
               id: reportId,
@@ -941,31 +1241,56 @@ const App: React.FC = () => {
       {/* Smooth Logo Reveal Splash Animation */}
       {showEntranceSplash && (
         <div 
-          className="fixed inset-0 z-[999] bg-[#0e1621] flex flex-col items-center justify-center animate-in fade-in duration-300"
+          className="fixed inset-0 z-[999] bg-[#0e1621] flex flex-col items-center justify-center animate-in fade-in duration-300 p-6 select-none cursor-pointer"
           onClick={() => setShowEntranceSplash(false)}
         >
-          <div className="relative flex items-center justify-center mb-6">
-            {/* Shimmering Pulsing Glow Rings */}
-            <div className="absolute w-36 h-36 rounded-full bg-[#3390ec]/20 animate-ping opacity-60" />
-            <div className="absolute w-44 h-44 rounded-full bg-[#3390ec]/10 animate-pulse" />
-            
-            {/* Logo Badge */}
-            <div className="relative w-24 h-24 bg-gradient-to-tr from-[#2b5278] via-[#3390ec] to-[#5288c1] rounded-[32px] flex items-center justify-center shadow-2xl shadow-[#3390ec]/40 transform animate-pop">
-              <Send size={46} className="text-white -translate-x-1" />
-            </div>
-          </div>
+          {/* Subtle Ambient Radial Glow */}
+          <div className="absolute w-[500px] h-[500px] bg-[#3390ec]/15 rounded-full blur-3xl pointer-events-none -top-10 -right-10 animate-pulse" />
+          <div className="absolute w-[400px] h-[400px] bg-emerald-500/10 rounded-full blur-3xl pointer-events-none -bottom-10 -left-10" />
 
-          <div className="text-center space-y-2 animate-in slide-in-from-bottom duration-500">
-            <h1 className="text-2xl font-bold text-white tracking-wide flex items-center justify-center gap-2">
-              <span>خوش آمدید به استارلی چت</span>
-              <Sparkles size={20} className="text-amber-400" />
-            </h1>
-            <p className="text-xs text-[#708499]">پیام‌رسان ابری، امن و پرسرعت</p>
-            {currentUser && (
-              <p className="text-xs text-[#3390ec] font-bold mt-1">
-                ورود به عنوان {currentUser.displayName}
+          {/* Spacious Modern Welcome Card */}
+          <div className="relative z-10 max-w-sm w-full p-8 bg-[#17212b]/90 border border-white/10 rounded-3xl backdrop-blur-md shadow-2xl flex flex-col items-center text-center space-y-6">
+            {/* Glowing Logo Icon */}
+            <div className="relative flex items-center justify-center my-2">
+              <div className="absolute w-28 h-28 rounded-full bg-[#3390ec]/20 animate-ping opacity-50" />
+              <div className="absolute w-36 h-36 rounded-full bg-[#3390ec]/10 animate-pulse" />
+              <div className="relative w-24 h-24 bg-gradient-to-tr from-[#2b5278] via-[#3390ec] to-[#5288c1] rounded-3xl flex items-center justify-center shadow-2xl shadow-[#3390ec]/40 transform animate-pop">
+                <Send size={44} className="text-white -translate-x-0.5" />
+              </div>
+            </div>
+
+            {/* Title & Slogan */}
+            <div className="space-y-2">
+              <h1 className="text-2xl font-black text-white tracking-wide flex items-center justify-center gap-2">
+                <span>استارلی چت</span>
+                <Sparkles size={20} className="text-amber-400" />
+              </h1>
+              <p className="text-xs text-[#708499] leading-relaxed">
+                پیام‌رسان ابری، امن و پرسرعت با رمزنگاری پیشرفته
               </p>
+            </div>
+
+            {/* Current User Welcome Badge */}
+            {currentUser && (
+              <div className="flex items-center gap-3 px-4 py-2.5 bg-[#242f3d]/80 rounded-2xl border border-white/5 w-full">
+                <img 
+                  src={currentUser.avatar || DEFAULT_AVATAR} 
+                  onError={(e) => { e.currentTarget.src = DEFAULT_AVATAR; }}
+                  className="w-9 h-9 rounded-full object-cover bg-[#0e1621] shrink-0" 
+                />
+                <div className="flex-1 text-right min-w-0">
+                  <p className="text-[11px] text-[#708499]">خوش آمدید</p>
+                  <p className="text-xs font-bold text-white truncate">{currentUser.displayName}</p>
+                </div>
+              </div>
             )}
+
+            {/* Tap to enter hint */}
+            <div className="pt-2 text-center">
+              <span className="inline-block px-4 py-1.5 bg-white/5 hover:bg-white/10 text-[#708499] hover:text-white rounded-full text-[11px] transition-colors">
+                برای ورود سریع کلیک کنید
+              </span>
+            </div>
           </div>
         </div>
       )}

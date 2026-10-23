@@ -11,7 +11,7 @@ export const setToken = (t: string | null) => {
 async function call(path: string, init?: RequestInit & { json?: any }) {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   const t = getToken();
-  if (t) headers.Authorization = `Bearer ${t}`;
+  if (t) headers.Authorization = `Bearer ${t}` ;
   try {
     const res = await fetch(path, {
       ...init,
@@ -39,5 +39,6 @@ export const authApi = {
   },
   me: () => call('/api/auth/me'),
   heartbeat: () => call('/api/users/heartbeat', { method: 'POST' }),
-  logout: async () => { await call('/api/auth/logout', { method: 'POST' }); setToken(null); }
+  logout: async () => { await call('/api/auth/logout', { method: 'POST' }); setToken(null); },
+  deleteAccount: async () => { const r = await call('/api/auth/delete-account', { method: 'POST' }); setToken(null); return r; }
 };

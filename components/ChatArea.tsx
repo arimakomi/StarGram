@@ -1,13 +1,16 @@
+import { generateLocalAvatarSvg } from '../services/avatarGenerator';
+import { GroupEditModal } from './GroupEditModal';
+import { ChannelEditModal } from './ChannelEditModal';
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Chat, User, Message, Poll, DEFAULT_AVATAR } from '../types';
+import { Chat, User, Message, Poll, DEFAULT_AVATAR, AdminPermissions } from '../types';
 import { 
   Send, Paperclip, Smile, MessageCircle, Trash, Mic, Info, X, 
   ChevronLeft, UserMinus, UserPlus, Image as ImageIcon, 
   Pin, Reply, BarChart2, Volume2, Square, Plus, CheckCheck, MoreVertical,
-  Link as LinkIcon, Edit3, Shield, Copy, Users, Bookmark, RotateCcw, Clock, Lock, 
+  Link as LinkIcon, Edit3, Shield, ShieldCheck, Copy, Users, Bookmark, RotateCcw, Clock, 
   ArrowRight, Search, Play, Pause, Download, Share2, Globe, Heart, ThumbsUp, Flame, Check,
   ZoomIn, ZoomOut, Phone, Bell, BellOff, Trash2, AtSign, FileText, CheckCircle2, Flag,
-  Eye, Calendar, Instagram, Palette, CheckCircle
+  Eye, Calendar, Instagram, Palette, CheckCircle, RefreshCw
 } from 'lucide-react';
 import { compressImage } from '../services/imageUtils';
 import { encryptMessage } from '../services/cryptoUtils';
@@ -30,6 +33,43 @@ interface ChatAreaProps {
 
 const POPULAR_REACTIONS = ['❤️', '👍', '🔥', '😂', '👏', '🎉'];
 
+const EMOJI_CATEGORIES = [
+  {
+    id: 'smileys',
+    name: 'لبخندها',
+    icon: '😀',
+    emojis: ['😀', '😃', '😄', '😁', '😆', '😅', '😂', '🤣', '🥹', '😊', '😇', '🙂', '🙃', '😉', '😌', '😍', '🥰', '😘', '😗', '😙', '😚', '😋', '😛', '😜', '🤪', '😝', '🤑', '🤗', '🤭', '🫢', '🫣', '🤫', '🤔', '🫡', '🤐', '🤨', '😐', '😑', '😶', '🫥', '😏', '😒', '🙄', '😬', '😮‍💨', '🤥', '😌', '😔', '😪', '🤤', '😴', '😷', '🤒', '🤕', '🤢', '🤮', '🤧', '🥵', '🥶', '🥴', '😵', '😵‍💫', '🤯', '🤠', '🥳', '🥸', '😎', '🤓', '🧐']
+  },
+  {
+    id: 'gestures',
+    name: 'اشاره‌ها',
+    icon: '👍',
+    emojis: ['👍', '👎', '👌', '🤌', '🤏', '✌️', '🤞', '🫰', '🤟', '🤘', '🤙', '👈', '👉', '👆', '🖕', '👇', '☝️', '🫵', '✋', '🤚', '🖐️', '🖖', '👋', '🤝', '👏', '🙌', '👐', '🤲', '🙏', '✍️', '💪', '🦾']
+  },
+  {
+    id: 'hearts',
+    name: 'قلب‌ها',
+    icon: '❤️',
+    emojis: ['❤️', '🧡', '💛', '💚', '💙', '💜', '🖤', '🤍', '🤎', '💔', '❤️‍🔥', '❤️‍🩹', '❣️', '💕', '💞', '💓', '💗', '💖', '💘', '💝', '💟', '☮️', '✝️', '☪️', '🕉️', '☸️', '✡️']
+  },
+  {
+    id: 'celebrate',
+    name: 'جشن و نمادها',
+    icon: '🔥',
+    emojis: ['🔥', '✨', '🎉', '🎊', '🎁', '🎈', '⭐', '🌟', '💫', '💥', '💯', '💢', '💤', '👑', '🏆', '🥇', '🥈', '🥉', '🎯', '🚀', '⚡', '☀️', '🌙', '☁️', '☕', '🍕', '🍔', '🍟']
+  }
+];
+
+const DEFAULT_ADMIN_PERMISSIONS: AdminPermissions = {
+  canChangeInfo: true,
+  canDeleteMessages: true,
+  canBanUsers: true,
+  canInviteUsers: true,
+  canPinMessages: true,
+  canAddAdmins: false
+};
+
+
 const ChatArea: React.FC<ChatAreaProps> = ({ 
   chat, currentUser, isTyping, onAction, onDeleteChat, onBack, onUsernameClick, onToggleContact,
   chats = [], onOpenSavedMessages, onReportMessage
@@ -37,6 +77,19 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   const [inputText, setInputText] = useState('');
   const [showInfo, setShowInfo] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [selectedEmojiTab, setSelectedEmojiTab] = useState('smileys');
+
+  // Group / Channel Management Modals
+  const [showEditGroupModal, setShowEditGroupModal] = useState(false);
+  const [editGroupName, setEditGroupName] = useState('');
+  const [editGroupDesc, setEditGroupDesc] = useState('');
+  const [editGroupAvatar, setEditGroupAvatar] = useState('');
+  const [editIsPublic, setEditIsPublic] = useState(false);
+  const [editPublicHandle, setEditPublicHandle] = useState('');
+
+  // Admin Permissions Management Modal
+  const [managingAdminUser, setManagingAdminUser] = useState<User | null>(null);
+  const [editingAdminPerms, setEditingAdminPerms] = useState<AdminPermissions>(DEFAULT_ADMIN_PERMISSIONS);
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
   const [editingMessage, setEditingMessage] = useState<Message | null>(null);
 
@@ -91,8 +144,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   const [showSeenSubmenu, setShowSeenSubmenu] = useState(false);
   const [customChatWallpaperUrl, setCustomChatWallpaperUrl] = useState('');
   const chatWallpaperFileRef = useRef<HTMLInputElement>(null);
-
-  // Auto-mark unseen messages as seen by currentUser
+// Auto-mark unseen messages as seen by currentUser
   useEffect(() => {
     if (!chat || !currentUser || chat.type === 'saved') return;
     const unseenIds: string[] = [];
@@ -196,6 +248,34 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   // Reaction popover target
   const [activeReactionMsgId, setActiveReactionMsgId] = useState<string | null>(null);
 
+  // Escape key handler: close inner overlays/dialogs or exit chat to main page
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (lightboxImage) { setLightboxImage(null); return; }
+        if (showEmojiPicker) { setShowEmojiPicker(false); return; }
+        if (contextMenu) { setContextMenu(null); return; }
+        if (activeReactionMsgId) { setActiveReactionMsgId(null); return; }
+        if (showPollModal) { setShowPollModal(false); return; }
+        if (showWallpaperModal) { setShowWallpaperModal(false); return; }
+        if (showSeenSubmenu) { setShowSeenSubmenu(false); return; }
+        if (showEditGroupModal) { setShowEditGroupModal(false); return; }
+        if (showInfo) { setShowInfo(false); return; }
+        if (replyingTo) { setReplyingTo(null); return; }
+        if (editingMessage) { setEditingMessage(null); return; }
+        if (showSearch) { setShowSearch(false); return; }
+        // If nothing local is open, back out of the chat
+        onBack();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [
+    lightboxImage, showEmojiPicker, contextMenu, activeReactionMsgId,
+    showPollModal, showWallpaperModal, showSeenSubmenu, showEditGroupModal, showInfo,
+    replyingTo, editingMessage, showSearch, onBack
+  ]);
+
   // Info Drawer Tab
   const [infoTab, setInfoTab] = useState<'members' | 'media'>('members');
 
@@ -225,7 +305,25 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     };
   }, [isRecording]);
 
-  // Mention Detection Logic
+
+  const handleInsertEmoji = (emoji: string) => {
+    const textarea = textareaRef.current;
+    if (!textarea) {
+      setInputText(prev => prev + emoji);
+      return;
+    }
+    const start = textarea.selectionStart || 0;
+    const end = textarea.selectionEnd || 0;
+    const newText = inputText.substring(0, start) + emoji + inputText.substring(end);
+    setInputText(newText);
+    setTimeout(() => {
+      textarea.focus();
+      const newPos = start + emoji.length;
+      textarea.setSelectionRange(newPos, newPos);
+    }, 0);
+  };
+
+    // Mention Detection Logic
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const val = e.target.value;
     setInputText(val);
@@ -302,22 +400,97 @@ const ChatArea: React.FC<ChatAreaProps> = ({
 
   if (!chat || !chatInfo) {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center bg-[#0e1621] text-[#708499]">
-        <div className="bg-[#17212b] p-8 rounded-full mb-4 shadow-2xl animate-pulse">
-          <MessageCircle size={64} className="opacity-30 text-[#3390ec]" />
+      <div className="flex-1 flex flex-col items-center justify-center bg-[#0e1621] text-[#708499] p-6 relative overflow-hidden select-none">
+        {/* Subtle Ambient Radial Glow */}
+        <div className="absolute w-[450px] h-[450px] bg-[#3390ec]/10 rounded-full blur-3xl pointer-events-none -top-20 -right-20 animate-pulse" />
+        <div className="absolute w-[350px] h-[350px] bg-emerald-500/5 rounded-full blur-3xl pointer-events-none -bottom-10 -left-10" />
+
+        <div className="relative z-10 max-w-md w-full flex flex-col items-center text-center space-y-6">
+          {/* Logo Badge with Breathing Room */}
+          <div className="relative group">
+            <div className="absolute -inset-2 bg-gradient-to-tr from-[#3390ec] to-emerald-400 rounded-3xl blur-xl opacity-30 group-hover:opacity-60 transition duration-500" />
+            <div className="relative w-24 h-24 bg-gradient-to-b from-[#1e2a38] to-[#17212b] border border-white/10 rounded-3xl flex items-center justify-center shadow-2xl">
+              <MessageCircle size={44} className="text-[#3390ec]" />
+            </div>
+          </div>
+
+          {/* Heading with Generous Spacing */}
+          <div className="space-y-2">
+            <h2 className="text-2xl font-bold text-white tracking-wide">
+              پیام‌رسان استارلی چت
+            </h2>
+            <p className="text-xs text-[#708499] leading-relaxed">
+              ارتباطی امن، ابری و بدون محدودیت با رمزنگاری پیشرفته سراسری
+            </p>
+          </div>
+
+          {/* Feature Badges with clean spacing */}
+          <div className="grid grid-cols-1 gap-2.5 w-full pt-2">
+            <div className="flex items-center gap-3 p-3 bg-[#17212b]/80 border border-white/5 rounded-2xl text-right">
+              <div className="w-8 h-8 rounded-xl bg-emerald-500/10 flex items-center justify-center text-emerald-400 shrink-0">
+                <ShieldCheck size={16} />
+              </div>
+              <div className="flex-1">
+                <h4 className="text-xs font-bold text-white">رمزنگاری سرتاسری</h4>
+                <p className="text-[11px] text-[#708499]">محافظت کامل از پیام‌ها با کلیدهای امنیتی اختصاصی</p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 p-3 bg-[#17212b]/80 border border-white/5 rounded-2xl text-right">
+              <div className="w-8 h-8 rounded-xl bg-[#3390ec]/10 flex items-center justify-center text-[#3390ec] shrink-0">
+                <Shield size={16} />
+              </div>
+              <div className="flex-1">
+                <h4 className="text-xs font-bold text-white">حریم خصوصی شناسه کاربری</h4>
+                <p className="text-[11px] text-[#708499]">جستجو و ارتباط اختصاصی تنها با آیدی دقیق</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Call to action instruction */}
+          <div className="pt-2">
+            <span className="inline-block px-4 py-2 bg-[#242f3d]/70 text-[#3390ec] border border-[#3390ec]/20 rounded-full text-xs font-medium">
+              یک گفتگو را از فهرست سمت راست برای شروع انتخاب کنید
+            </span>
+          </div>
         </div>
-        <h2 className="text-xl font-bold text-white mb-2">پیام‌رسان استارلی چت</h2>
-        <p className="text-sm font-medium opacity-60">یک گفتگو را از منوی سمت راست برای شروع انتخاب کنید</p>
       </div>
     );
   }
 
-  const isAdmin = chat.adminId === currentUser.id;
+  const isCreator = chat.adminId === currentUser.id;
+  const userAdminPerms = chat.admins?.[currentUser.id];
+  const isAdmin = isCreator || Boolean(userAdminPerms);
+  const canChangeInfo = isCreator || Boolean(userAdminPerms?.canChangeInfo);
+  const canDeleteAnyMsg = isCreator || Boolean(userAdminPerms?.canDeleteMessages);
+  const canBanMembers = isCreator || Boolean(userAdminPerms?.canBanUsers);
+  const canInvite = isCreator || Boolean(userAdminPerms?.canInviteUsers);
+  const canAddAdmins = isCreator || Boolean(userAdminPerms?.canAddAdmins);
+
   const isChannel = chat.type === 'channel';
   const isGroup = chat.type === 'group';
 
+  // Member granular permissions for group
+  const memberCanSendMessages = isCreator || isAdmin || !isGroup || (chat.permissions?.canSendMessages !== false);
+  const memberCanSendMedia = isCreator || isAdmin || !isGroup || (chat.permissions?.canSendMedia !== false);
+  const memberCanSendVoice = isCreator || isAdmin || !isGroup || (chat.permissions?.canSendVoice !== false);
+  const memberCanSendPolls = isCreator || isAdmin || !isGroup || (chat.permissions?.canSendPolls !== false);
+  const memberCanPinMessages = isCreator || isAdmin || (isGroup && Boolean(chat.permissions?.canPinMessages));
+
+  // Allowed reactions for group & channel (no hook after early return)
+  const allowedChatEmojis = (!isGroup && !isChannel)
+    ? POPULAR_REACTIONS 
+    : chat.reactionsSetting === 'off' 
+      ? [] 
+      : (chat.reactionsSetting === 'some' && chat.allowedReactions && chat.allowedReactions.length > 0)
+        ? chat.allowedReactions
+        : POPULAR_REACTIONS;
+
   // Filter messages based on search
-  const filteredMessages = chat.messages.filter(m => {
+  const clearTimestamp = chat.clearedAt?.[currentUser.id] || 0;
+  const filteredMessages = chat.messages
+    .filter(m => !clearTimestamp || m.timestamp > clearTimestamp)
+    .filter(m => {
     if (!searchInChat.trim()) return true;
     return m.text.toLowerCase().includes(searchInChat.toLowerCase());
   });
@@ -556,9 +729,6 @@ const ChatArea: React.FC<ChatAreaProps> = ({
             </div>
             <div className="overflow-hidden min-w-0">
               <div className="flex items-center gap-1.5">
-                <span title="گفتگوی امن رمزشده با کلید ۲۵۶ بیتی Web Crypto" className="text-emerald-400 shrink-0 flex items-center">
-                  <Lock size={14} className="stroke-[2.5]" />
-                </span>
                 <h3 className="font-bold text-[15px] text-white truncate">{chatInfo.title}</h3>
                 {chat.isPublic && (
                   <span title="گروه عمومی" className="shrink-0 flex items-center">
@@ -570,10 +740,6 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                 <p className={`text-[11px] font-medium truncate ${chatInfo.isOnline ? 'text-green-400 font-bold' : 'text-[#3390ec]'}`}>
                   {chatInfo.status}
                 </p>
-                <span className="text-[10px] text-emerald-400 font-mono flex items-center gap-0.5" title="امنیت سرتاسری E2EE فعال">
-                  <span>·</span>
-                  <span>E2EE AES-256</span>
-                </span>
               </div>
             </div>
           </div>
@@ -663,7 +829,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
               id={msg.id}
               className={`flex w-full animate-msg ${isMe ? 'justify-start' : 'justify-end'}`}
             >
-              <div className="flex items-end gap-2 max-w-[88%] md:max-w-[78%] group">
+              <div className="flex items-end gap-2 max-w-[96%] md:max-w-[88%] group">
                 
                 {/* Desktop Hover Actions Menu */}
                 <div className="hidden md:flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity self-center">
@@ -685,13 +851,15 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                   >
                     <Share2 size={13} />
                   </button>
-                  <button 
-                    onClick={() => setActiveReactionMsgId(activeReactionMsgId === msg.id ? null : msg.id)} 
-                    className="p-1.5 bg-[#17212b]/80 hover:bg-[#3390ec] rounded-full text-[#708499] hover:text-white transition-all shadow-sm"
-                    title="واکنش"
-                  >
-                    <Smile size={13} />
-                  </button>
+                  {(allowedChatEmojis.length > 0 || isAdmin) && (
+                    <button 
+                      onClick={() => setActiveReactionMsgId(activeReactionMsgId === msg.id ? null : msg.id)} 
+                      className="p-1.5 bg-[#17212b]/80 hover:bg-[#3390ec] rounded-full text-[#708499] hover:text-white transition-all shadow-sm"
+                      title="واکنش"
+                    >
+                      <Smile size={13} />
+                    </button>
+                  )}
                 </div>
 
                 {/* Message Bubble (With Right-Click and Mobile Long-Press) */}
@@ -705,7 +873,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                   {/* Floating Reaction Bar when toggled */}
                   {activeReactionMsgId === msg.id && (
                     <div className="absolute -top-11 left-0 z-30 bg-[#17212b] border border-white/10 rounded-full p-1 flex items-center gap-1 shadow-2xl animate-pop">
-                      {POPULAR_REACTIONS.map(emoji => (
+                      {(allowedChatEmojis.length > 0 ? allowedChatEmojis : POPULAR_REACTIONS).map(emoji => (
                         <button 
                           key={emoji}
                           onClick={() => {
@@ -720,7 +888,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                     </div>
                   )}
 
-                  <div className={`message-bubble p-2.5 md:p-3 shadow-md relative rounded-2xl ${isMe ? 'bg-[#2b5278] rounded-tr-none text-white' : 'bg-[#182533] rounded-tl-none text-white'}`}>
+                  <div className={`message-bubble p-2.5 md:p-3.5 shadow-md relative rounded-2xl max-w-full break-words ${isMe ? 'bg-[#2b5278] rounded-tr-none text-white' : 'bg-[#182533] rounded-tl-none text-white'}`}>
                     {/* Sender Name in Groups */}
                     {isGroup && !isMe && sender && (
                       <div 
@@ -728,6 +896,25 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                         onClick={() => onUsernameClick(sender.username)}
                       >
                         {sender.displayName}
+                      </div>
+                    )}
+
+                    {/* Sender Profile in Channel when showAuthorsProfiles is enabled */}
+                    {isChannel && chat.showAuthorsProfiles && sender && (
+                      <div 
+                        className="flex items-center gap-1.5 mb-1.5 cursor-pointer group/author"
+                        onClick={() => onUsernameClick(sender.username)}
+                      >
+                        <img 
+                          src={sender.avatar || DEFAULT_AVATAR} 
+                          className="w-4 h-4 rounded-full object-cover border border-[#3390ec]/30" 
+                        />
+                        <span className="text-[11px] font-bold text-[#3390ec] group-hover/author:underline">
+                          {sender.displayName}
+                        </span>
+                        <span className="text-[8px] bg-[#3390ec]/15 text-[#3390ec] px-1.5 py-0.5 rounded-md font-semibold">
+                          نویسنده
+                        </span>
                       </div>
                     )}
 
@@ -847,7 +1034,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
 
                     {/* Text Content (Rendered only if real text exists, not placeholders) */}
                     {shouldRenderText(msg.text) && (
-                      <p className="text-[14px] leading-relaxed whitespace-pre-wrap font-normal">
+                      <p className="text-[14px] leading-relaxed whitespace-pre-wrap font-normal break-words">
                         {renderMessageText(msg.text)}
                       </p>
                     )}
@@ -881,9 +1068,10 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                         </span>
                       )}
 
-                      {msg.isEncrypted && (
-                        <span title="رمزگذاری شده با کلید AES-256" className="text-emerald-400">
-                          <Lock size={10} />
+                      {/* Sign messages in Channel */}
+                      {isChannel && chat.signMessages && sender && (
+                        <span className="text-[10px] text-[#3390ec] font-medium mr-1 select-none" title="امضای نویسنده">
+                          {sender.displayName}
                         </span>
                       )}
                       {msg.isEdited && <span className="text-[9px]">ویرایش شده</span>}
@@ -1089,7 +1277,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
               </button>
             )}
 
-            {(contextMenu.message.senderId === currentUser.id || isAdmin) && (
+            {(contextMenu.message.senderId === currentUser.id || canDeleteAnyMsg) && (
               <>
                 <div className="h-px bg-white/5 my-1" />
                 <button 
@@ -1177,9 +1365,54 @@ const ChatArea: React.FC<ChatAreaProps> = ({
           </div>
         )}
 
-        {(!isChannel || isAdmin || chatInfo.isSaved) ? (
+        {((!isChannel && memberCanSendMessages) || isAdmin || chatInfo.isSaved) ? (
           <div className="flex items-end gap-2 max-w-5xl mx-auto">
-            <div className="flex-1 bg-[#242f3d] rounded-[22px] flex items-center px-2 md:px-3 py-1 shadow-lg border border-white/5 focus-within:border-[#3390ec]/30 transition-all">
+            <div className="flex-1 bg-[#242f3d] rounded-[22px] flex items-center px-2 md:px-3 py-1 shadow-lg border border-white/5 focus-within:border-[#3390ec]/30 transition-all relative">
+              {/* Emoji Picker Popup */}
+              {showEmojiPicker && (
+                <div 
+                  className="absolute bottom-full mb-3 right-0 w-80 max-w-[calc(100vw-32px)] bg-[#17212b] border border-white/10 rounded-2xl shadow-2xl p-3 z-50 animate-in fade-in zoom-in-95 flex flex-col text-right select-none"
+                  onClick={e => e.stopPropagation()}
+                >
+                  <div className="flex items-center justify-between border-b border-white/5 pb-2 mb-2">
+                    <div className="flex gap-1 overflow-x-auto">
+                      {EMOJI_CATEGORIES.map(cat => (
+                        <button
+                          key={cat.id}
+                          type="button"
+                          onClick={() => setSelectedEmojiTab(cat.id)}
+                          className={`px-2.5 py-1 rounded-xl text-xs font-bold transition-all flex items-center gap-1 ${
+                            selectedEmojiTab === cat.id ? 'bg-[#3390ec] text-white shadow-sm' : 'hover:bg-white/5 text-[#708499]'
+                          }`}
+                        >
+                          <span>{cat.icon}</span>
+                          <span className="text-[11px]">{cat.name}</span>
+                        </button>
+                      ))}
+                    </div>
+                    <button 
+                      type="button"
+                      onClick={() => setShowEmojiPicker(false)}
+                      className="p-1 hover:bg-white/5 rounded-lg text-[#708499] hover:text-white"
+                    >
+                      <X size={15}/>
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-7 sm:grid-cols-8 gap-1 max-h-52 overflow-y-auto custom-scrollbar p-1">
+                    {(EMOJI_CATEGORIES.find(c => c.id === selectedEmojiTab)?.emojis || []).map((emoji, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => handleInsertEmoji(emoji)}
+                        className="text-xl p-1.5 hover:bg-white/10 rounded-xl active:scale-125 transition-transform flex items-center justify-center cursor-pointer select-none"
+                      >
+                        {emoji}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
               <button 
                 type="button"
                 onClick={() => setShowEmojiPicker(!showEmojiPicker)} 
@@ -1208,7 +1441,13 @@ const ChatArea: React.FC<ChatAreaProps> = ({
               {isGroup && (
                 <button 
                   type="button"
-                  onClick={() => setShowPollModal(true)} 
+                  onClick={() => {
+                  if (!memberCanSendPolls) {
+                    alert('ارسال نظرسنجی در این گروه توسط مدیران محدود شده است.');
+                    return;
+                  }
+                  setShowPollModal(true);
+                }} 
                   className="p-2 text-[#708499] hover:text-[#3390ec] transition-colors min-h-[40px] min-w-[40px] flex items-center justify-center"
                   title="ایجاد نظرسنجی"
                 >
@@ -1219,7 +1458,13 @@ const ChatArea: React.FC<ChatAreaProps> = ({
               {/* Attachment Button */}
               <button 
                 type="button"
-                onClick={() => fileInputRef.current?.click()} 
+                onClick={() => {
+                  if (!memberCanSendMedia) {
+                    alert('ارسال رسانه و عکس در این گروه توسط مدیران محدود شده است.');
+                    return;
+                  }
+                  fileInputRef.current?.click();
+                }} 
                 className="p-2 text-[#708499] hover:text-[#3390ec] transition-colors min-h-[40px] min-w-[40px] flex items-center justify-center"
                 title="ارسال تصویر"
               >
@@ -1492,7 +1737,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                   </div>
 
                   {/* Complementary Actions Row (Add Contact, Voice Call, Clear Chat) */}
-                  <div className="grid grid-cols-3 gap-2">
+                  <div className="grid grid-cols-2 gap-2">
                     <button 
                       onClick={() => onToggleContact?.(otherUser)}
                       className={`p-2.5 rounded-xl text-xs font-bold flex flex-col items-center justify-center gap-1.5 transition-all active:scale-95 border ${isContact ? 'bg-red-500/10 border-red-500/30 text-red-400 hover:bg-red-500/20' : 'bg-[#3390ec]/15 border-[#3390ec]/30 text-[#3390ec] hover:bg-[#3390ec]/25'}`}
@@ -1501,13 +1746,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                       <span className="text-[11px]">{isContact ? 'حذف مخاطب' : 'افزودن مخاطب'}</span>
                     </button>
 
-                    <button 
-                      onClick={() => alert(`درحال برقراری تماس صوتی با ${otherUser.displayName}...`)}
-                      className="p-2.5 rounded-xl bg-white/5 border border-white/5 hover:bg-white/10 text-white text-xs font-bold flex flex-col items-center justify-center gap-1.5 transition-all active:scale-95"
-                    >
-                      <Phone size={18} className="text-green-400"/>
-                      <span className="text-[11px]">تماس صوتی</span>
-                    </button>
+                    
 
                     <button 
                       onClick={() => {
@@ -1799,6 +2038,23 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                     {chat.description}
                   </p>
                 )}
+
+                {canChangeInfo && (
+                  <button
+                    onClick={() => {
+                      setEditGroupName(chat.groupName || '');
+                      setEditGroupDesc(chat.description || '');
+                      setEditGroupAvatar(chat.groupAvatar || '');
+                      setEditIsPublic(Boolean(chat.isPublic));
+                      setEditPublicHandle(chat.publicHandle || '');
+                      setShowEditGroupModal(true);
+                    }}
+                    className="mt-3.5 w-full py-2 px-3 bg-[#3390ec]/15 border border-[#3390ec]/30 text-[#3390ec] hover:bg-[#3390ec]/25 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all active:scale-95"
+                  >
+                    <Edit3 size={14} />
+                    <span>ویرایش اطلاعات {chat.type === 'channel' ? 'کانال' : 'گروه'}</span>
+                  </button>
+                )}
               </div>
 
               {/* Links & Handles */}
@@ -1810,17 +2066,31 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                   </div>
                 )}
                 {chat.inviteLink && (
-                  <div className="p-2.5 bg-[#242f3d] rounded-xl space-y-1">
-                    <div className="flex justify-between items-center text-[#708499]">
-                      <span>لینک دعوت:</span>
+                  <div className="p-3 bg-[#242f3d] rounded-2xl space-y-2 border border-white/5">
+                    <div className="flex justify-between items-center text-[#708499] text-xs">
+                      <span className="font-bold">پیوند دعوت {chat.isPublic ? 'عمومی' : 'خصوصی'}:</span>
                       <button 
-                        onClick={() => { navigator.clipboard.writeText(chat.inviteLink!); alert("لینک دعوت کپی شد!"); }}
-                        className="text-[#3390ec] hover:underline flex items-center gap-1 font-bold"
+                        onClick={() => { navigator.clipboard.writeText(chat.inviteLink!); alert("پیوند دعوت با موفقیت کپی شد!"); }}
+                        className="text-[#3390ec] hover:text-[#2881d9] flex items-center gap-1 font-bold bg-white/5 px-2.5 py-1 rounded-lg transition-colors"
                       >
-                        <Copy size={13}/> کپی لینک
+                        <Copy size={13}/> کپی پیوند
                       </button>
                     </div>
-                    <p className="text-[11px] text-white/80 truncate" dir="ltr">{chat.inviteLink}</p>
+                    <p className="text-[11px] text-[#3390ec] font-mono truncate bg-black/25 p-2 rounded-xl" dir="ltr">{chat.inviteLink}</p>
+
+                    {(isCreator || canInvite) && (
+                      <button
+                        onClick={() => {
+                          if (confirm('آیا از باطل کردن پیوند دعوت قبلی و ایجاد پیوند جدید اطمینان دارید؟ پیوند قبلی دیگر معتبر نخواهد بود.')) {
+                            onAction('regenerateInviteLink', {});
+                          }
+                        }}
+                        className="w-full py-1.5 px-2 bg-amber-500/10 border border-amber-500/20 hover:bg-amber-500/20 text-amber-400 rounded-xl text-[11px] font-bold flex items-center justify-center gap-1.5 transition-all"
+                      >
+                        <RefreshCw size={13} />
+                        <span>باطل کردن و ایجاد پیوند جدید</span>
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -1845,33 +2115,95 @@ const ChatArea: React.FC<ChatAreaProps> = ({
               <div className="p-4">
                 {infoTab === 'members' ? (
                   <div className="space-y-2">
-                    {chat.participants.map(p => (
-                      <div 
-                        key={p.id}
-                        onClick={() => onUsernameClick(p.username)}
-                        className="flex items-center justify-between p-2 hover:bg-white/5 rounded-xl cursor-pointer transition-colors"
-                      >
-                        <div className="flex items-center gap-2.5">
-                          <div className="relative">
-                            <img 
-                              src={p.avatar || DEFAULT_AVATAR} 
-                              onError={(e) => { e.currentTarget.src = DEFAULT_AVATAR; }}
-                              className="w-9 h-9 rounded-full object-cover"
-                            />
-                            {p.status === 'online' && <div className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 rounded-full border-2 border-[#17212b]"/>}
+                    {chat.participants.map(p => {
+                      const isOwner = chat.adminId === p.id;
+                      const isMemberAdmin = Boolean(chat.admins?.[p.id]);
+
+                      return (
+                        <div 
+                          key={p.id}
+                          className="flex flex-col p-2.5 hover:bg-white/5 rounded-2xl transition-colors bg-[#242f3d]/40 border border-white/5 space-y-2"
+                        >
+                          <div className="flex items-center justify-between cursor-pointer" onClick={() => onUsernameClick(p.username)}>
+                            <div className="flex items-center gap-2.5">
+                              <div className="relative">
+                                <img 
+                                  src={p.avatar || DEFAULT_AVATAR} 
+                                  onError={(e) => { e.currentTarget.src = DEFAULT_AVATAR; }}
+                                  className="w-10 h-10 rounded-full object-cover border border-white/10"
+                                />
+                                {getUserPresence(p).isOnline && <div className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 rounded-full border-2 border-[#17212b]"/>}
+                              </div>
+                              <div>
+                                <h5 className="font-bold text-xs text-white">{p.displayName}</h5>
+                                <p className="text-[10px] text-[#708499]" dir="ltr">@{p.username}</p>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-1.5">
+                              {isOwner && (
+                                <span className="text-[10px] text-amber-400 font-bold bg-amber-400/15 border border-amber-400/25 px-2 py-0.5 rounded-full">
+                                  👑 مالک
+                                </span>
+                              )}
+                              {isMemberAdmin && !isOwner && (
+                                <span className="text-[10px] text-[#3390ec] font-bold bg-[#3390ec]/15 border border-[#3390ec]/25 px-2 py-0.5 rounded-full">
+                                  🛡️ مدیر
+                                </span>
+                              )}
+                            </div>
                           </div>
-                          <div>
-                            <h5 className="font-bold text-xs text-white">{p.displayName}</h5>
-                            <p className="text-[10px] text-[#708499]">@{p.username}</p>
-                          </div>
+
+                          {/* Creator / Admin Action Buttons for this Member */}
+                          {p.id !== currentUser.id && !isOwner && (
+                            <div className="flex items-center gap-1.5 pt-1 border-t border-white/5 justify-end">
+                              {/* If Viewer is Owner/Creator */}
+                              {isCreator && (
+                                <>
+                                  <button
+                                    onClick={() => {
+                                      setManagingAdminUser(p);
+                                      setEditingAdminPerms(chat.admins?.[p.id] || DEFAULT_ADMIN_PERMISSIONS);
+                                    }}
+                                    className="px-2.5 py-1 bg-[#3390ec]/15 hover:bg-[#3390ec]/25 text-[#3390ec] rounded-lg text-[10.5px] font-bold flex items-center gap-1 transition-colors"
+                                  >
+                                    <Shield size={12}/>
+                                    <span>{isMemberAdmin ? 'ویرایش اختیارات' : 'تعیین به عنوان مدیر'}</span>
+                                  </button>
+
+                                  {isMemberAdmin && (
+                                    <button
+                                      onClick={() => {
+                                        if (confirm(`آیا مطمئن هستید که می‌خواهید مقام مدیریت ${p.displayName} را لغو کنید؟`)) {
+                                          onAction('removeAdmin', { userId: p.id });
+                                        }
+                                      }}
+                                      className="px-2 py-1 bg-white/5 hover:bg-white/10 text-[#708499] hover:text-white rounded-lg text-[10.5px] font-bold transition-colors"
+                                    >
+                                      عزل
+                                    </button>
+                                  )}
+                                </>
+                              )}
+
+                              {/* Kick member (if Creator OR Admin with canBanUsers) */}
+                              {(isCreator || (canBanMembers && !isMemberAdmin)) && (
+                                <button
+                                  onClick={() => {
+                                    if (confirm(`آیا از اخراج ${p.displayName} از این گفتگو اطمینان دارید؟`)) {
+                                      onAction('kickMember', { userId: p.id });
+                                    }
+                                  }}
+                                  className="px-2 py-1 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg text-[10.5px] font-bold transition-colors"
+                                >
+                                  اخراج
+                                </button>
+                              )}
+                            </div>
+                          )}
                         </div>
-                        {chat.adminId === p.id && (
-                          <span className="text-[10px] text-[#3390ec] font-bold bg-[#3390ec]/15 px-2 py-0.5 rounded-full">
-                            مدیر
-                          </span>
-                        )}
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 ) : (
                   <div className="grid grid-cols-3 gap-2">
@@ -1907,6 +2239,111 @@ const ChatArea: React.FC<ChatAreaProps> = ({
           )}
         </div>
       </div>
+
+      {/* Edit Group Modal (Only for groups: Complete 7 capabilities) */}
+      {showEditGroupModal && isGroup && (
+        <GroupEditModal
+          chat={chat}
+          currentUser={currentUser}
+          chats={chats || []}
+          onClose={() => setShowEditGroupModal(false)}
+          onAction={onAction}
+          onDeleteChat={onDeleteChat}
+        />
+      )}
+
+      {/* Edit Channel Modal (Only for channels: Complete Telegram-spec capabilities) */}
+      {showEditGroupModal && isChannel && (
+        <ChannelEditModal
+          chat={chat}
+          currentUser={currentUser}
+          chats={chats || []}
+          onClose={() => setShowEditGroupModal(false)}
+          onAction={onAction}
+          onDeleteChat={onDeleteChat}
+        />
+      )}
+
+      {/* Admin Permissions Modal */}
+      {managingAdminUser && (
+        <div 
+          className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4 backdrop-blur-xs animate-in fade-in"
+          onClick={() => setManagingAdminUser(null)}
+        >
+          <div 
+            className="w-full max-w-md bg-[#17212b] rounded-3xl overflow-hidden shadow-2xl border border-white/10 flex flex-col p-6 space-y-4 animate-pop text-right"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-white/5 pb-3">
+              <div className="flex items-center gap-2.5">
+                <Shield className="text-[#3390ec]" size={20}/>
+                <div>
+                  <h3 className="font-bold text-white text-sm">اختیارات مدیر</h3>
+                  <p className="text-[10px] text-[#708499]">{managingAdminUser.displayName} (@{managingAdminUser.username})</p>
+                </div>
+              </div>
+              <button onClick={() => setManagingAdminUser(null)} className="p-1 hover:bg-white/10 rounded-full text-[#708499]">
+                <X size={18}/>
+              </button>
+            </div>
+
+            <p className="text-xs text-[#708499]">
+              مشخص کنید این مدیر چه کارهایی می‌تواند در {chat.type === 'channel' ? 'کانال' : 'گروه'} انجام دهد:
+            </p>
+
+            <div className="space-y-2.5 max-h-72 overflow-y-auto custom-scrollbar pr-1">
+              {[
+                { key: 'canChangeInfo', label: 'تغییر اطلاعات و مشخصات', desc: 'نام، توضیحات، آواتار و لینک گفتگو' },
+                { key: 'canDeleteMessages', label: 'حذف پیام‌های سایر اعضا', desc: 'پاکسازی پیام‌های ارسالی دیگران' },
+                { key: 'canBanUsers', label: 'مسدودسازی و اخراج اعضا', desc: 'اخراج اعضای متخلف از گروه' },
+                { key: 'canInviteUsers', label: 'دعوت با پیوند اختصاصی', desc: 'مشاهده و اشتراک‌گذاری پیوند دعوت' },
+                { key: 'canPinMessages', label: 'سنجاق کردن پیام‌ها', desc: 'پین کردن اعلان‌ها در بالای گفتگو' },
+                { key: 'canAddAdmins', label: 'افزودن مدیران جدید', desc: 'انتصاب اعضای دیگر به عنوان ادمین' }
+              ].map(perm => {
+                const isChecked = Boolean(editingAdminPerms[perm.key as keyof AdminPermissions]);
+                return (
+                  <div 
+                    key={perm.key}
+                    onClick={() => setEditingAdminPerms(prev => ({ ...prev, [perm.key]: !isChecked }))}
+                    className="flex items-center justify-between p-3 rounded-2xl bg-[#242f3d]/60 border border-white/5 cursor-pointer hover:bg-[#242f3d] transition-all"
+                  >
+                    <div>
+                      <h5 className="text-xs font-bold text-white">{perm.label}</h5>
+                      <p className="text-[10px] text-[#708499]">{perm.desc}</p>
+                    </div>
+                    <div className={`w-10 h-5 flex items-center rounded-full p-0.5 transition-colors ${isChecked ? 'bg-[#3390ec]' : 'bg-white/20'}`}>
+                      <div className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${isChecked ? '-translate-x-5' : 'translate-x-0'}`} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setManagingAdminUser(null)}
+                className="flex-1 py-2.5 bg-white/5 hover:bg-white/10 text-[#708499] hover:text-white rounded-xl text-xs font-bold transition-all"
+              >
+                انصراف
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onAction('setAdminPermissions', {
+                    userId: managingAdminUser.id,
+                    permissions: editingAdminPerms
+                  });
+                  setManagingAdminUser(null);
+                }}
+                className="flex-1 py-2.5 bg-[#3390ec] hover:bg-[#2881d9] text-white rounded-xl text-xs font-bold transition-all shadow-md"
+              >
+                ذخیره اختیارات مدیر
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Toast notification for successful forward */}
       {forwardSuccessToast && (

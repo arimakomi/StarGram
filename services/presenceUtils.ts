@@ -11,6 +11,13 @@ export function getUserPresence(user?: Partial<User> | null, viewerIsContact: bo
     return { isOnline: false, label: 'آفلاین' };
   }
 
+  // If user has explicitly logged out
+  if (user.status === 'offline') {
+    if (!user.lastSeen) {
+      return { isOnline: false, label: 'آفلاین' };
+    }
+  }
+
   // Check privacy settings
   const privacy = user.privacy?.showStatus || 'all';
   if (privacy === 'none' || (privacy === 'contacts' && !viewerIsContact)) {
@@ -19,9 +26,6 @@ export function getUserPresence(user?: Partial<User> | null, viewerIsContact: bo
 
   const lastSeen = user.lastSeen;
   if (!lastSeen) {
-    if (user.status === 'online') {
-      return { isOnline: true, label: 'آنلاین' };
-    }
     return { isOnline: false, label: 'آخرین بازدید به تازگی' };
   }
 
@@ -31,8 +35,8 @@ export function getUserPresence(user?: Partial<User> | null, viewerIsContact: bo
   const diffMin = Math.floor(diffSec / 60);
   const diffHours = Math.floor(diffMin / 60);
 
-  // Online threshold: active within the last 75 seconds
-  if (diffSec < 75) {
+  // Online threshold: active within the last 60 seconds and NOT explicitly offline
+  if (user.status !== 'offline' && diffSec <= 60) {
     return { isOnline: true, label: 'آنلاین' };
   }
 

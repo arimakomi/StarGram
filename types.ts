@@ -42,6 +42,7 @@ export interface Message {
   forwardedFrom?: string;
   isEncrypted?: boolean;
   encryptedIv?: string;
+  encryptedPayload?: string;
   seenBy?: MessageSeenInfo[];
   viewsCount?: number;
   viewers?: string[];
@@ -54,14 +55,54 @@ export interface AdminPermissions {
   canInviteUsers: boolean;
   canPinMessages: boolean;
   canAddAdmins: boolean;
+  canPostMessages?: boolean;
+  canEditMessages?: boolean;
+  canManageStories?: boolean;
+  customTitle?: string;
 }
 
 export interface Permissions {
   canSendMessages: boolean;
   canSendMedia: boolean;
+  canSendVoice?: boolean;
+  canSendPolls?: boolean;
+  canEmbedLinks?: boolean;
   canAddUsers: boolean;
   canPinMessages: boolean;
   canChangeInfo: boolean;
+}
+
+export interface InviteLinkItem {
+  id: string;
+  link: string;
+  title?: string;
+  createdAt: number;
+  creatorId?: string;
+  creatorName?: string;
+  expiresAt?: number;
+  usageLimit?: number;
+  usageCount?: number;
+  isRevoked?: boolean;
+}
+
+export interface RemovedUserItem {
+  id: string;
+  username: string;
+  displayName: string;
+  avatar: string;
+  removedAt: number;
+  removedByName?: string;
+  reason?: string;
+}
+
+export interface RecentActionItem {
+  id: string;
+  actorId: string;
+  actorName: string;
+  action: string;
+  title: string;
+  details?: string;
+  timestamp: number;
 }
 
 export interface User {
@@ -82,6 +123,7 @@ export interface User {
   bannedUntil?: number; // timestamp for temporary ban
   banReason?: string;
   twoFactorEnabled?: boolean;
+  twoFactorSecret?: string;
   passcode?: string;
   theme: 'day' | 'night' | 'oled' | 'arctic';
   wallpaper: string;
@@ -105,6 +147,7 @@ export interface Chat {
   isSecret?: boolean; // E2EE secret chat
   isLockedByAdmin?: boolean; // Locked by super admin
   deletedForUserIds?: string[];
+  clearedAt?: Record<string, number>; // Timestamps per user when history was cleared/deleted
   unreadCount: number;
   groupName?: string;
   groupAvatar?: string;
@@ -118,6 +161,13 @@ export interface Chat {
   slowMode?: number;
   participantIds?: string[];
   wallpaper?: string;
+  reactionsSetting?: 'all' | 'some' | 'off';
+  allowedReactions?: string[];
+  inviteLinksList?: InviteLinkItem[];
+  recentActions?: RecentActionItem[];
+  signMessages?: boolean;
+  showAuthorsProfiles?: boolean;
+  removedUsersList?: RemovedUserItem[];
 }
 
 export type FolderType = 'all' | 'private' | 'groups' | 'channels' | 'saved';
@@ -151,11 +201,14 @@ export interface MessageReport {
 }
 
 export interface SystemConfig {
-  allowGroupCreation: boolean;
-  allowChannelCreation: boolean;
-  allowStories: boolean;
-  geminiEnabled?: boolean;
+  allowRegistration?: boolean;
+  allowGroupCreation?: boolean;
+  allowChannelCreation?: boolean;
+  allowPublicChannels?: boolean;
+  allowStories?: boolean;
+  defaultUserRole?: 'user' | string;
   geminiApiKey?: string;
+  geminiEnabled?: boolean;
   geminiProxyUrl?: string;
   geminiModel?: string;
 }
