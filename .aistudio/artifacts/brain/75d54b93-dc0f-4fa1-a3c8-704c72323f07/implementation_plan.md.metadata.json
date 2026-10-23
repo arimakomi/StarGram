@@ -1,6 +1,0 @@
-{
-  "summary":  "Implementation plan for StarGram fixes and enhancements:\n1. Message Read Receipts & Seen System: Single/double tick logic, group right-click seen count row with hover submenu listing members (avatars, names, timestamps) exclusively for sender's own messages, and channel message view counts visible to everyone.\n2. Accurate Real-time Online Presence & Last Seen: Dynamic heartbeat with last seen timestamps ('آنلاین', 'آخرین بازدید ۲ دقیقه پیش', etc.) replacing the static 'always online' status.\n3. Enhanced User Profile: Extended fields (Bio, Phone, Birthday, Telegram ID, Instagram ID) with clean omission of empty fields across profiles.\n4. Chat Wallpapers & Custom Backgrounds: Preset patterns, textures, custom image uploads/URLs, with global default and per-chat customization options.\n5. Push & In-App Notification System: Web Notification API for mobile and desktop, Web Audio API synthesised sound chime, and interactive in-app toast alerts.\n6. Smooth Login & Entrance Animation: Telegram-style splash logo reveal with fluid scale-in and transition into the chat dashboard.",
-  "updatedAt":  "2026-10-23T10:43:48.357339931Z",
-  "requestFeedback":  true,
-  "userFacing":  true
-}
