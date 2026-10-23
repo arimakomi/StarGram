@@ -1,114 +1,129 @@
-# StarGram CLI: English Localization, Safe Update & Uninstall
+# StarGram CLI: Upstream Force-Sync & Database Preservation
 
-Comprehensive modernization of the StarGram terminal CLI (`stargram`) and installer (`setup.sh`) to provide an English-first terminal experience, automated database-safe updates with pre-update snapshot creation, and clean service uninstallation that preserves database data and configurations automatically.
+A safe, resilient update pipeline for the StarGram CLI that forces synchronization with the latest upstream repository state—overriding local code modifications, merge conflicts, or branch divergence—while strictly protecting all databases, environment credentials, and automated backup snapshots.
 
-### User Review & Critical Decisions
+## User Review & Critical Decisions
 
 > [!IMPORTANT]
-> The following operational behaviors have been confirmed through user clarification:
+> The update pipeline is architected to prioritize code freshness from the upstream repository without risking data loss. The choices confirmed in Phase 1 have been locked into the technical specification:
 
-- **Confirmed Decision 1 (Uninstall Safety)**: `stargram uninstall` will cleanly stop and remove the systemd service and command symlink while **always keeping all database files (`data/`), `.env` configurations, and database tables intact**.
-- **Confirmed Decision 2 (Zero-Loss Update)**: `stargram update` will automatically execute a snapshot database backup (`cmd_backup`) before pulling updates, installing dependencies, rebuilding the frontend bundle, and running non-destructive schema synchronization.
-- **Confirmed Decision 3 (Terminal Localization)**: All terminal banners, prompts, status screens, and interactive menus across `/bin/stargram` and `/setup.sh` are converted completely to standard, professional English.
-
----
-
-### 1. Overview & Core Concept
-
-- **What It Does**: Provides server administrators with a robust, English-localized terminal suite for managing StarGram. Features include service control (`start`, `stop`, `restart`, `enable`, `disable`), health probes, port re-mapping, live log inspection, non-destructive automated updates with pre-update backup snapshots, and a safe uninstallation command that preserves valuable user data.
-- **Target Audience / Persona**: Self-hosters, DevOps engineers, and server administrators deploying StarGram on Linux VPS/cloud servers.
-- **Key Value**: Guarantees zero downtime accidents or database corruption during updates, allows safe service decommissioning without data loss, and delivers a clean, universal English CLI standard.
+- **Confirmed Decision 1 (Conflict & Divergence Strategy)**: Automatic pre-update database backup followed by a hard reset (`git fetch` + `git reset --hard`) directly to the upstream repository branch.
+- **Confirmed Decision 2 (Untracked Files)**: Clean untracked code files while strictly protecting and preserving `data/`, `backups/`, `.env`, and existing database storage.
+- **Safety Safeguard**: Before any git operation runs, all runtime configurations (`.env`), local JSON databases (`data/stargram_db.json`), and backups are snapshot-staged in temporary safe storage and verified after the sync.
 
 ---
 
-### 2. User Experience & Visual Design
+## 1. Overview & Core Concept
 
-#### Key User Flows
-
-1. **Interactive Management Menu (`stargram` or `sudo stargram`)**:
-   - Launches an English dashboard showing live system status: service state (Active/Inactive), auto-start status, listening port, database engine details (PostgreSQL, MySQL, or Local Storage), database connection health, server uptime, and project directory.
-   - Clean numbered menu options:
-     - `1) Start` & `6) View Logs`
-     - `2) Stop` & `7) Health / Database Diagnostic`
-     - `3) Restart` & `8) Update from Git (Zero Data Loss)`
-     - `4) Change Port` & `9) Database Backup Snapshot`
-     - `5) Toggle Autostart` & `a) Reset Admin Password`
-     - `u) Uninstall Service` & `0) Exit`
-2. **Safe Automated Update Flow (`stargram update`)**:
-   - Step 1: Takes an automated pre-update database snapshot into `backups/`.
-   - Step 2: Checks git status and pulls latest repository release (`git pull --ff-only`).
-   - Step 3: Installs updated dependencies (`npm install --no-audit --no-fund`).
-   - Step 4: Recompiles the Vite client application (`npm run build`).
-   - Step 5: Runs idempotent database synchronization (`node server.js --init`) without dropping existing tables or records.
-   - Step 6: Restarts the systemd unit and polls `/api/health` to confirm active status.
-3. **Safe Uninstall Flow (`stargram uninstall`)**:
-   - Stops the running systemd daemon.
-   - Disables autostart and removes `/etc/systemd/system/stargram.service`.
-   - Reloads systemd daemon.
-   - Removes `/usr/local/bin/stargram` symlink.
-   - Prints clear confirmation that all database files, user uploads, `.env` credentials, and backup archives remain safely preserved in the project directory.
-
-#### Visual Identity & Terminal Design
-- **Color Coding**: 
-  - Green (`✔`, `Active`, `Healthy`) for operational success.
-  - Red (`✘`, `Inactive`, `Error`) for failures and stopped services.
-  - Yellow (`!`, `Disabled`, `Warning`) for cautions and state changes.
-  - Blue (`➜`, `[1]`) for section headers and prompts.
-- **Typography & Formatting**: Clean Unicode box borders (`══════════`), aligned label-value columns, and standard ISO timestamps on backup snapshots.
+- **What It Does**: Enhances `stargram update` (and CLI menu option 8) so server administrators can reliably update their production StarGram instances regardless of local file drifts, merge conflicts, or divergent git histories, while guaranteeing zero database corruption or credential loss.
+- **Target Audience / Persona**: System administrators, self-hosters, and DevOps engineers running StarGram on Linux servers (VPS, cloud instances, or local machines).
+- **Key Value**: Eliminates manual `git merge` / `git stash` hassles and "git pull failed due to uncommitted changes" errors during updates, ensuring continuous, hands-off alignment with upstream releases.
 
 ---
 
-### 3. Key Product Decisions & Trade-Offs
+## 2. User Experience & Visual Design
 
-- **Decision 1: Pre-Update Backup Snapshot**
-  - *Chosen Approach*: Force an automated call to `cmd_backup` before any git pull or build step executes in `cmd_update`.
-  - *Why*: Guarantees immediate disaster recovery if a remote commit alters table constraints or introduces unexpected issues.
-  - *Alternatives Considered*: Manual backup prompt (rejected because automated backups eliminate human error during updates).
-- **Decision 2: Automatic Data Preservation on Uninstall**
-  - *Chosen Approach*: De-register systemd service and CLI binaries, but leave `.env`, `data/`, and database tables intact.
-  - *Why*: Respects user choice A and prevents catastrophic permanent data loss if an administrator uninstalls the service temporarily for maintenance or migration.
-- **Decision 3: Complete English Localization of Installer and CLI**
-  - *Chosen Approach*: Translate all messages, prompts, banners, help screens, and interactive dialogs in both `/bin/stargram` and `/setup.sh` to English.
-  - *Why*: Aligns with standard Linux server conventions and fulfills the user's explicit mandate that all terminal outputs be English.
-
----
-
-### 4. Technical Architecture & Data Strategy
+### Key User Flows
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                      Linux Host System                      │
-│                                                             │
-│   ┌───────────────────────┐       ┌─────────────────────┐   │
-│   │   setup.sh (English)  │──────▶│ /etc/systemd/system │   │
-│   │  One-line VPS Setup   │       │   stargram.service  │   │
-│   └───────────────────────┘       └──────────┬──────────┘   │
-│                                              │ controls     │
-│   ┌───────────────────────┐                  ▼              │
-│   │  stargram CLI tool    │──────▶┌─────────────────────┐   │
-│   │  /bin/stargram        │       │   Node.js Server    │   │
-│   │  - status / logs      │       │     server.js       │   │
-│   │  - update (safe)      │       └──────────┬──────────┘   │
-│   │  - backup / restore   │                  │              │
-│   │  - uninstall (safe)   │                  ▼              │
-│   └──────────┬────────────┘       ┌─────────────────────┐   │
-│              │ snapshots          │  Database Storage   │   │
-│              ▼                    │  - PostgreSQL /     │   │
-│   ┌───────────────────────┐       │    MySQL Engine     │   │
-│   │ backups/*.sql.gz      │       │  - data/stargram_   │   │
-│   │ backups/*.json.gz     │       │    db.json (Local)  │   │
-│   └───────────────────────┘       └─────────────────────┘   │
-└─────────────────────────────────────────────────────────────┘
+[Administrator runs 'stargram update']
+  │
+  ├─► 1. Pre-Update Snapshot: Automated database backup (.sql.gz or .json.gz)
+  │
+  ├─► 2. State Staging: Safe-staging .env, data/, and backups/ to /tmp
+  │
+  ├─► 3. Upstream Fetch & Sync:
+  │      • git fetch --all --prune
+  │      • Determine remote branch (tracking or origin/main / origin/master)
+  │      • git reset --hard <upstream-target>
+  │      • git clean -fd with data, backups, and .env exclusions
+  │
+  ├─► 4. Integrity Verification: Verify & restore .env and data/ if needed
+  │
+  ├─► 5. Build & Migrate: npm install -> npm run build -> node server.js --init
+  │
+  └─► 6. Service Restart: systemctl restart stargram -> display updated status
 ```
 
-#### CLI Command Matrix
+### Visual & Interactive Feedback in Terminal
 
-| Command | Action Performed | Data Safety Guarantee |
-| :--- | :--- | :--- |
-| `stargram status` | Queries systemd & `/api/health` | Read-only; zero mutation |
-| `stargram start / stop / restart` | Controls `systemctl` lifecycle | Zero file/database changes |
-| `stargram update` | Backup ➔ Pull ➔ Install ➔ Build ➔ DB sync ➔ Restart | Auto-backup snapshot taken first; idempotent DB init |
-| `stargram uninstall` | Stops service, removes systemd unit & CLI symlink | Databases, configs & backups preserved automatically |
-| `stargram backup` | Generates `.sql.gz` or `.json.gz` snapshot | Pure archive creation in `backups/` |
-| `stargram port [N]` | Rebinds port in `.env` & firewall, restarts service | Preserves all credentials and records |
-| `stargram admin` | Sets new admin username/password via `server.js --init` | Updates credentials securely without touching messages |
+- **Color Tokens**: Standard ANSI escape formatting matching the existing StarGram CLI theme (`${B}` bold blue headers, `${G}` green checkmarks, `${Y}` yellow warnings, `${R}` red errors, `${D}` dim details).
+- **Step-by-Step Progress**:
+  - `➜ Step 1/6: Creating automated pre-update database backup snapshot...`
+  - `➜ Step 2/6: Staging database and environment files for safe preservation...`
+  - `➜ Step 3/6: Force-synchronizing codebase with latest upstream repository...`
+  - `➜ Step 4/6: Updating dependencies (npm install)...`
+  - `➜ Step 5/6: Building production frontend bundle (npm run build)...`
+  - `➜ Step 6/6: Running database schema migrations...`
+  - `✔ StarGram update completed successfully. Running on latest upstream commit.`
+
+---
+
+## 3. Key Product Decisions & Trade-Offs
+
+- **Decision 1: Upstream Force-Reset vs. Git Pull Rebase**
+  - *Chosen Approach*: `git fetch --all --prune` followed by `git reset --hard origin/<branch>`.
+  - *Why*: In production environments, servers frequently develop minor drifts (file permissions, build artifacts, temporary debug lines). Standard `git pull` or `git rebase` fails on these conflicts. Force-reset guarantees 100% parity with upstream.
+  - *Alternatives Considered*: Standard `git pull --ff-only` (fails when local commits or dirty worktrees exist); interactive merge (requires manual user intervention in headless cron or automated scripts).
+
+- **Decision 2: Multi-Layer Database & Config Safeguards**
+  - *Chosen Approach*: Dual-layer protection:
+    1. A formal gzipped backup archive saved to `$APP_DIR/backups/`.
+    2. An in-memory/temporary staging snapshot in `/tmp/stargram_stage_$$` to restore local state immediately if `git reset` or `git clean` affects untracked configuration.
+  - *Why*: Redundancy ensures zero data loss even if network interrupts the git operation midway.
+  - *Alternatives Considered*: Relying solely on `.gitignore` (fragile if upstream repository modifies `.gitignore`).
+
+---
+
+## 4. Technical Architecture & Data Strategy
+
+### System Workflow Diagram
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                    stargram update CLI                       │
+└──────────────────────────────┬───────────────────────────────┘
+                               │
+               ┌───────────────▼───────────────┐
+               │    1. Automated Backup        │
+               │  (dump DB -> backups/*.gz)    │
+               └───────────────┬───────────────┘
+                               │
+               ┌───────────────▼───────────────┐
+               │    2. Staging Protection      │
+               │  (copy .env & data/ to /tmp)  │
+               └───────────────┬───────────────┘
+                               │
+               ┌───────────────▼───────────────┐
+               │   3. Upstream Force-Sync      │
+               │  - git fetch --all --prune    │
+               │  - git reset --hard origin/.. │
+               │  - git clean -fd (filtered)   │
+               └───────────────┬───────────────┘
+                               │
+               ┌───────────────▼───────────────┐
+               │    4. Restore & Verify        │
+               │  - ensure .env & data/ match  │
+               │  - clean /tmp staging         │
+               └───────────────┬───────────────┘
+                               │
+               ┌───────────────▼───────────────┐
+               │   5. Production Rebuild       │
+               │  - npm install                │
+               │  - npm run build              │
+               │  - node server.js --init      │
+               └───────────────┬───────────────┘
+                               │
+               ┌───────────────▼───────────────┐
+               │    6. Service Restart         │
+               │  - systemctl restart stargram │
+               │  - show health status         │
+               └───────────────────────────────┘
+```
+
+### Data Model & State Protection
+
+- **MySQL / PostgreSQL Databases**: Reside in the SQL database daemon; unaffected by git operations, with fresh SQL dumps in `backups/`.
+- **Local Database (`data/stargram_db.json`)**: Preserved via staging, excluded from git clean, and validated post-reset.
+- **Environment (`.env`)**: Contains database passwords, JWT secrets, port, and Gemini API keys; preserved via staging and git clean exclusions.
+- **Backup Archives (`backups/`)**: Retains all historical and pre-update snapshots.

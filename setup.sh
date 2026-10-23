@@ -29,7 +29,12 @@ if ! { [[ -f "$SELF_DIR/server.js" ]] && grep -q '"name": "stargram"' "$SELF_DIR
     else die "git is not installed. Please install git and try again."; fi
   fi
   if [[ -d "$INSTALL_DIR/.git" ]]; then
-    info "Updating existing repository in $INSTALL_DIR ..."; git -C "$INSTALL_DIR" pull --ff-only
+    info "Synchronizing existing repository in $INSTALL_DIR with upstream..."
+    git -C "$INSTALL_DIR" fetch --all --prune >/dev/null 2>&1 || true
+    local_b="$(git -C "$INSTALL_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")"
+    [[ "$local_b" == "HEAD" || -z "$local_b" ]] && local_b="main"
+    git -C "$INSTALL_DIR" reset --hard "origin/${local_b}" >/dev/null 2>&1 || git -C "$INSTALL_DIR" reset --hard origin/main >/dev/null 2>&1 || git -C "$INSTALL_DIR" pull --ff-only || true
+    git -C "$INSTALL_DIR" clean -fd -e data -e "data/*" -e backups -e "backups/*" -e ".env" -e ".env.*" >/dev/null 2>&1 || true
   else
     info "Cloning StarGram into $INSTALL_DIR ..."; git clone --depth 1 "$REPO_URL" "$INSTALL_DIR"
   fi

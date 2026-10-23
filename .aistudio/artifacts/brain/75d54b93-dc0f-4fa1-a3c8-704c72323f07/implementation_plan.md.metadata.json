@@ -1,6 +1,6 @@
 {
-  "summary":  "Implementation plan for StarGram CLI English localization, automated zero-loss updates with pre-update backup snapshot, and safe service uninstallation with automatic data preservation.",
-  "updatedAt":  "2026-10-23T10:01:29.903248060Z",
+  "summary":  "Implementation plan for StarGram CLI safe force-sync update to upstream repository while strictly preserving database, environment configurations, and backup archives.",
+  "updatedAt":  "2026-10-23T10:12:44.274220350Z",
   "requestFeedback":  true,
   "userFacing":  true
 }
