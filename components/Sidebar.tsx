@@ -83,7 +83,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   const [publicHandle, setPublicHandle] = useState('');
   const [groupAvatar, setGroupAvatar] = useState<string>('');
   // PWA detection & Install Prompt State
-  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(() => (window as any).stargramInstallPrompt || null);
   const [isPWA, setIsPWA] = useState<boolean>(() => {
     try {
       return window.matchMedia('(display-mode: standalone)').matches ||
@@ -98,14 +98,20 @@ const Sidebar: React.FC<SidebarProps> = ({
   useEffect(() => {
     const handleBeforeInstall = (e: Event) => {
       e.preventDefault();
+      (window as any).stargramInstallPrompt = e;
       setDeferredPrompt(e);
     };
     const handleAppInstalled = () => {
       setIsPWA(true);
+      (window as any).stargramInstallPrompt = null;
       setDeferredPrompt(null);
+    };
+    const handleInstallPromptReady = () => {
+      setDeferredPrompt((window as any).stargramInstallPrompt || null);
     };
     window.addEventListener('beforeinstallprompt', handleBeforeInstall);
     window.addEventListener('appinstalled', handleAppInstalled);
+    window.addEventListener('stargram:installprompt', handleInstallPromptReady);
 
     const mql = window.matchMedia('(display-mode: standalone)');
     const handleMql = (e: MediaQueryListEvent) => {
@@ -116,6 +122,7 @@ const Sidebar: React.FC<SidebarProps> = ({
     return () => {
       window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
       window.removeEventListener('appinstalled', handleAppInstalled);
+      window.removeEventListener('stargram:installprompt', handleInstallPromptReady);
       mql.removeEventListener('change', handleMql);
     };
   }, []);
@@ -126,11 +133,12 @@ const Sidebar: React.FC<SidebarProps> = ({
       try {
         deferredPrompt.prompt();
         const choice = await deferredPrompt.userChoice;
-        if (choice && choice.outcome === 'accepted') {
-          setIsPWA(true);
-        }
+        if (choice?.outcome === 'accepted') setIsPWA(true);
+        (window as any).stargramInstallPrompt = null;
         setDeferredPrompt(null);
       } catch {
+        (window as any).stargramInstallPrompt = null;
+        setDeferredPrompt(null);
         setShowPwaGuideModal(true);
       }
     } else {
@@ -1544,6 +1552,11 @@ const Sidebar: React.FC<SidebarProps> = ({
             </div>
 
             <div className="space-y-3 text-xs text-[#708499] leading-relaxed">
+              {!window.isSecureContext && (
+                <p className="rounded-xl border border-amber-400/20 bg-amber-400/10 p-3 text-amber-200">
+                  نصب برنامه فقط روی HTTPS یا آدرس localhost فعال می‌شود. این سایت را با HTTPS باز کنید و دوباره تلاش کنید.
+                </p>
+              )}
               <p className="text-white font-medium">
                 برای نصب پیام‌رسان استارلی روی دستگاه خود و استفاده بدون نوار مرورگر:
               </p>

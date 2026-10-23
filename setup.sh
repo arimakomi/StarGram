@@ -6,7 +6,7 @@
 set -euo pipefail
 
 SERVICE_NAME="stargram"
-REPO_URL="${REPO_URL:-https://github.com/arimakomi/starchat.git}"
+REPO_URL="${REPO_URL:-https://github.com/arimakomi/StarGram.git}"
 INSTALL_DIR="${INSTALL_DIR:-/opt/stargram}"
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || pwd)"
 

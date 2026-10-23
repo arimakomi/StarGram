@@ -11,6 +11,17 @@
   <!-- PWA & Mobile Web App Meta -->
   <link rel="manifest" href="/manifest.json">
   <meta name="theme-color" content="#0e1621">
+  <script>
+    window.stargramInstallPrompt = null;
+    window.addEventListener('beforeinstallprompt', (event) => {
+      event.preventDefault();
+      window.stargramInstallPrompt = event;
+      window.dispatchEvent(new Event('stargram:installprompt'));
+    });
+    window.addEventListener('appinstalled', () => {
+      window.stargramInstallPrompt = null;
+    });
+  </script>
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
