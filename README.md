@@ -94,10 +94,25 @@ npm start
 
 ## 🔄 مدیریت و نگهداری
 
+بعد از نصب، دستور **`stargram`** در دسترس است. بدون آرگومان یک منوی تعاملی باز می‌کند که وضعیت (فعال/غیرفعال، پورت، سلامت دیتابیس) را نشان می‌دهد و امکان روشن/خاموش، ری‌استارت، تغییر پورت، لاگ، به‌روزرسانی، پشتیبان‌گیری و تغییر رمز ادمین را دارد:
+
 ```bash
-systemctl status stargram          # وضعیت
-systemctl restart stargram         # ریستارت
-journalctl -u stargram -f          # لاگ زنده
+sudo stargram                 # منوی تعاملی
+stargram status               # وضعیت
+sudo stargram start|stop|restart
+sudo stargram port 8080       # تغییر پورت (فایل .env + فایروال + ری‌استارت)
+sudo stargram logs [follow|errors|today]
+sudo stargram enable|disable  # اجرای خودکار بعد از ریبوت
+sudo stargram update          # git pull + build + restart
+sudo stargram backup          # پشتیبان فشرده‌ی دیتابیس در backups/
+sudo stargram admin           # تغییر رمز ادمین
+```
+
+معادل دستی:
+
+```bash
+systemctl status stargram
+journalctl -u stargram -f
 curl http://127.0.0.1:3000/api/health   # سلامت برنامه و دیتابیس
 ```
 
@@ -172,6 +187,7 @@ sudo certbot --nginx -d chat.example.com
 StarGram/
 ├── server.js            # سرور Express + API + اتصال دیتابیس
 ├── setup.sh             # نصب‌کننده تعاملی
+├── bin/stargram         # دستور مدیریت (منو)
 ├── .env.example         # نمونه‌ی تنظیمات
 ├── App.tsx, index.tsx   # ورودی برنامه
 ├── components/          # کامپوننت‌های رابط کاربری

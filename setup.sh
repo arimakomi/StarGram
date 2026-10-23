@@ -220,6 +220,10 @@ else
   warn "systemd یافت نشد. برنامه را دستی اجرا کنید:  cd $APP_DIR && npm start"
 fi
 
+# دستور مدیریتی  stargram
+chmod +x "$APP_DIR/bin/stargram"
+ln -sf "$APP_DIR/bin/stargram" /usr/local/bin/stargram && ok "دستور «stargram» نصب شد (منوی مدیریت)."
+
 # فایروال (اختیاری، بی‌صدا)
 if command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 2>&1; then
   firewall-cmd --permanent --add-port="${PORT}/tcp" >/dev/null 2>&1 && firewall-cmd --reload >/dev/null 2>&1 && ok "پورت $PORT در firewalld باز شد."
@@ -233,6 +237,6 @@ echo "  ادمین:          $ADMIN_USER"
 [[ $GENERATED_ADMIN -eq 1 ]] && echo "  رمز ادمین:      $ADMIN_PASS   ${c_ylw}(همین حالا ذخیره کنید؛ جای دیگری نگه‌داری نمی‌شود)${c_off}"
 echo "  دیتابیس:        $DB_USER@$DB_HOST:$DB_PORT/$DB_NAME"
 [[ $GENERATED_DB -eq 1 ]] && echo "  رمز دیتابیس:    (در $APP_DIR/.env ذخیره شد)"
-echo "  مدیریت سرویس:   systemctl status|restart $SERVICE_NAME  |  journalctl -u $SERVICE_NAME -f"
+echo "  مدیریت:         دستور  stargram  (منو: وضعیت، قطع/وصل، پورت، لاگ، به‌روزرسانی)"
 echo "  توصیه:          پشت Nginx/Caddy با HTTPS قرار دهید (راهنما در README)."
 echo
