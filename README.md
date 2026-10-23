@@ -1,6 +1,6 @@
 # StarGram
 
-> **Read this in:** [English](README.md) · [فارسی](README.fa.md) · [العربية](README.ar.md) · [Español](README.es.md) · [Français](README.fr.md) · [Türkçe](README.tr.md) · [简体中文](README.zh-CN.md)
+> **Read this in:** [English](README.md) · [فارسی](help/readmes/README.fa.md) · [العربية](help/readmes/README.ar.md) · [Español](help/readmes/README.es.md) · [Français](help/readmes/README.fr.md) · [Türkçe](help/readmes/README.tr.md) · [简体中文](help/readmes/README.zh-CN.md)
 
 [![MIT License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Build](https://github.com/arimakomi/StarGram/actions/workflows/build.yml/badge.svg)](https://github.com/arimakomi/StarGram/actions/workflows/build.yml)
