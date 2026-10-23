@@ -56,7 +56,7 @@ sudo stargram update
 sudo stargram help
 ~~~
 
-update puede sobrescribir cambios locales; haz una copia de seguridad antes. Los datos locales se guardan en data/stargram_db.json. El panel permite exportar y restaurar JSON.
+update descarga directamente de GitHub el archivo de la rama main, así que funciona aunque la carpeta no sea un repositorio Git. Reemplaza los archivos de la aplicación, instala dependencias, compila y reinicia systemd si está disponible. Conserva data/, backups/, los archivos .env y node_modules/. Los cambios locales del código pueden sobrescribirse.
 
 ## PWA y seguridad
 

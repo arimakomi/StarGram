@@ -13,5 +13,6 @@ jobs:
         with:
           node-version: 20
           cache: npm
+      - run: bash -n setup.sh bin/stargram
       - run: npm ci
       - run: npm run build

@@ -124,93 +124,74 @@ cmd_update() {
   need_root update
   cd "$APP_DIR" || return 1
 
-  echo "${B}➜ Step 1/6: Creating automated pre-update database backup snapshot...${X}"
+  [[ -f "$APP_DIR/server.js" && -f "$APP_DIR/package.json" ]] || { echo "${R}✘ StarGram installation files were not found in $APP_DIR.${X}"; return 1; }
+
+  echo "${B}➜ Step 1/5: Creating a pre-update database backup...${X}"
   cmd_backup || echo "${Y}⚠ Warning: Backup skipped or incomplete; proceeding with extra care.${X}"
 
-  echo "${B}➜ Step 2/6: Staging and shielding database, configuration, and backup files...${X}"
-  local stage_dir
+  echo "${B}➜ Step 2/5: Downloading the latest StarGram release from GitHub...${X}"
+  local stage_dir repo_url archive_file top_dir source_dir
   stage_dir="$(mktemp -d /tmp/stargram_stage_XXXXXX 2>/dev/null || mktemp -d)"
-  if [[ -f "$APP_DIR/.env" ]]; then
-    cp -p "$APP_DIR/.env" "$stage_dir/.env" 2>/dev/null || true
-  fi
-  if [[ -d "$APP_DIR/data" ]]; then
-    mkdir -p "$stage_dir/data"
-    cp -rp "$APP_DIR/data/." "$stage_dir/data/" 2>/dev/null || true
-  fi
-
-  echo "${B}➜ Step 3/6: Fetching latest upstream repository and force-aligning...${X}"
-  if [[ -d "$APP_DIR/.git" ]]; then
-    local current_branch remote upstream_ref
-    current_branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")"
-    [[ "$current_branch" == "HEAD" || -z "$current_branch" ]] && current_branch="main"
-
-    remote="$(git remote 2>/dev/null | head -1)"
-    remote="${remote:-origin}"
-
-    echo "${D}Fetching all remote branches and tags from ${remote}...${X}"
-    if ! git fetch --all --prune --tags; then
-      echo "${R}✘ git fetch failed. Please check internet and remote repository access.${X}"
-      rm -rf "$stage_dir"
-      return 1
-    fi
-
-    if git rev-parse --verify "${remote}/${current_branch}" >/dev/null 2>&1; then
-      upstream_ref="${remote}/${current_branch}"
-    elif git rev-parse --verify "${remote}/main" >/dev/null 2>&1; then
-      upstream_ref="${remote}/main"
-    elif git rev-parse --verify "${remote}/master" >/dev/null 2>&1; then
-      upstream_ref="${remote}/master"
-    else
-      upstream_ref="FETCH_HEAD"
-    fi
-
-    echo "${G}✔ Force-aligning local repository to upstream ${upstream_ref}...${X}"
-    if ! git reset --hard "$upstream_ref"; then
-      echo "${R}✘ git reset --hard ${upstream_ref} failed.${X}"
-      rm -rf "$stage_dir"
-      return 1
-    fi
-
-    echo "${D}Cleaning untracked files while preserving database, env, and backups...${X}"
-    git clean -fd -e data -e "data/*" -e backups -e "backups/*" -e ".env" -e ".env.*" 2>/dev/null || true
-  else
-    echo "${D}ℹ App directory is not a git repository clone; skipping git sync.${X}"
+  repo_url="${STARGRAM_REPO_URL:-https://github.com/arimakomi/StarGram}"
+  repo_url="${repo_url%.git}"
+  archive_file="$stage_dir/source.tar.gz"
+  if ! curl -fL --retry 2 --connect-timeout 15 "$repo_url/archive/refs/heads/main.tar.gz" -o "$archive_file"; then
+    echo "${R}✘ Could not download the latest StarGram files from GitHub. Check the server's internet connection and try again.${X}"
+    rm -rf "$stage_dir"
+    return 1
   fi
 
-  # Restore verified state if anything was removed during reset
-  if [[ -f "$stage_dir/.env" && ! -f "$APP_DIR/.env" ]]; then
-    cp -p "$stage_dir/.env" "$APP_DIR/.env"
+  top_dir="$(tar -tzf "$archive_file" 2>/dev/null | sed -n '1{s@/.*@@;p;}')"
+  [[ -n "$top_dir" ]] || { echo "${R}✘ The GitHub download is not a valid archive.${X}"; rm -rf "$stage_dir"; return 1; }
+  if ! tar -xzf "$archive_file" -C "$stage_dir" || [[ ! -f "$stage_dir/$top_dir/server.js" || ! -f "$stage_dir/$top_dir/package.json" ]] || ! grep -q '"name"[[:space:]]*:[[:space:]]*"stargram"' "$stage_dir/$top_dir/package.json"; then
+    echo "${R}✘ The downloaded archive is incomplete or is not a StarGram release.${X}"
+    rm -rf "$stage_dir"
+    return 1
   fi
-  if [[ -d "$stage_dir/data" ]]; then
-    mkdir -p "$APP_DIR/data"
-    cp -rpn "$stage_dir/data/." "$APP_DIR/data/" 2>/dev/null || true
+  source_dir="$stage_dir/$top_dir"
+
+  echo "${B}➜ Step 3/5: Replacing application files and preserving local data and configuration...${X}"
+  find "$APP_DIR" -mindepth 1 -maxdepth 1 \
+    ! -name .git ! -name .env ! -name '.env.*' ! -name data ! -name backups ! -name node_modules \
+    -exec rm -rf -- {} +
+  if ! cp -a "$source_dir/." "$APP_DIR/"; then
+    echo "${R}✘ Could not install the downloaded StarGram files.${X}"
+    rm -rf "$stage_dir"
+    return 1
   fi
   rm -rf "$stage_dir"
   chmod 700 "$APP_DIR/backups" 2>/dev/null || true
-  echo "${G}✔ Database integrity verified and preserved.${X}"
+  echo "${G}✔ Local database, environment files, backups, and node_modules were preserved.${X}"
 
-  echo "${B}➜ Step 4/6: Updating dependencies (npm install)...${X}"
-  npm install --no-audit --no-fund >/dev/null 2>&1 || npm install --no-audit --no-fund
+  echo "${B}➜ Step 4/5: Installing dependencies and building StarGram...${X}"
+  if ! npm install --no-audit --no-fund; then
+    echo "${R}✘ Dependency installation failed. Review the npm output and try stargram update again.${X}"
+    return 1
+  fi
+  if ! npm run build; then
+    echo "${R}✘ The production build failed. Review the build output and try stargram update again.${X}"
+    return 1
+  fi
 
-  echo "${B}➜ Step 5/6: Building production frontend bundle (npm run build)...${X}"
-  npm run build >/dev/null 2>&1 || { npm run build; return 1; }
-
-  echo "${B}➜ Step 6/6: Synchronizing database schema and migrations...${X}"
-  node server.js --init >/dev/null 2>&1 || node server.js --init
+  echo "${B}➜ Step 5/5: Applying database updates...${X}"
+  if ! node server.js --init; then
+    echo "${R}✘ Database initialization failed. Check the database settings and try stargram update again.${X}"
+    return 1
+  fi
 
   echo "${B}➜ Restarting StarGram service...${X}"
   if command -v systemctl >/dev/null 2>&1 && systemctl list-unit-files "$SERVICE.service" >/dev/null 2>&1; then
     systemctl restart "$SERVICE"
     sleep 2
     if is_active; then
-      echo "${G}✔ StarGram update and upstream sync completed successfully.${X}"
+      echo "${G}✔ StarGram was updated from GitHub and the service is running.${X}"
       cmd_status
     else
       echo "${R}✘ StarGram service failed to restart after update; check: stargram logs${X}"
       return 1
     fi
   else
-    echo "${G}✔ StarGram update completed successfully.${X}"
+    echo "${G}✔ StarGram was updated from GitHub successfully.${X}"
     echo "${Y}Note: systemd service not found. Start StarGram with: npm start${X}"
   fi
 }
@@ -265,7 +246,7 @@ menu() {
     echo
     echo "  ${B}1)${X} Start service                 ${B}6)${X} View logs"
     echo "  ${B}2)${X} Stop service                  ${B}7)${X} Health & DB check"
-    echo "  ${B}3)${X} Restart service               ${B}8)${X} Upstream sync & update (backup + reset + build)"
+    echo "  ${B}3)${X} Restart service               ${B}8)${X} Update from GitHub (backup + build)"
     echo "  ${B}4)${X} Change HTTP port              ${B}9)${X} Database backup snapshot"
     echo "  ${B}5)${X} Toggle auto-start on boot     ${B}a)${X} Reset admin credentials"
     echo "  ${B}u)${X} Uninstall service & CLI        ${B}0)${X} Exit"
@@ -321,7 +302,7 @@ case "${1:-menu}" in
     echo "  logs [follow]     View journal logs (use -f for live follow)"
     echo "  health            Perform health check query against API"
     echo "  backup            Create compressed database backup snapshot"
-    echo "  update            Force-sync to upstream repo while safely preserving all DB data"
+    echo "  update            Download the latest GitHub release and preserve local data"
     echo "  admin             Reset admin username / password"
     echo "  uninstall|remove  Uninstall systemd service & CLI (preserves data)"
     echo "  menu              Launch interactive management menu"

@@ -56,4 +56,4 @@ sudo stargram update
 sudo stargram help
 ~~~
 
-update 可能覆盖本地代码修改，请先备份。本地数据位于 data/stargram_db.json。安装 PWA 需要兼容浏览器和 HTTPS；开发时 localhost 可用。iOS 用户可在 Safari 分享菜单选择 Add to Home Screen。密码使用 scrypt 哈希，但消息并非端到端加密。项目采用 MIT 许可证。
+update 会直接从 GitHub 下载 main 分支归档，因此安装目录即使不是 Git 仓库也能更新。它会替换应用文件、安装依赖、构建前端，并在可用时重启 systemd。data/、backups/、.env 文件和 node_modules/ 会保留；本地代码修改可能被覆盖。PWA 安装需要兼容浏览器和 HTTPS。项目采用 MIT 许可证。

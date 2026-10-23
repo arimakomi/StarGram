@@ -140,7 +140,7 @@ sudo stargram update          # Back up data and update application code
 sudo stargram help            # Show all commands
 ~~~
 
-The update command synchronizes application code with upstream; local code changes may be overwritten. Back up the database and configuration before updating. CLI backups are stored in backups/.
+The update command downloads the latest main branch archive directly from GitHub, so it also works when the installation directory is not a Git checkout. It replaces application files, then installs dependencies, builds the frontend, applies database initialization, and restarts systemd when available. It preserves data/, backups/, .env files, and node_modules/. Local source-code edits may be overwritten. CLI backups are stored in backups/.
 
 ## Backups and data
 

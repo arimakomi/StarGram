@@ -56,4 +56,4 @@ sudo stargram update
 sudo stargram help
 ~~~
 
-update yerel kod değişikliklerinin üzerine yazabilir; önce yedek alın. Yerel veriler data/stargram_db.json dosyasındadır. PWA kurulumu uyumlu tarayıcı ve HTTPS gerektirir; geliştirmede localhost kullanılabilir. iOS'ta Safari paylaşım menüsünden Add to Home Screen seçin. Parolalar scrypt ile hashlenir, ancak mesajlar uçtan uca şifreli değildir. MIT lisansı.
+update main dalının arşivini doğrudan GitHub'dan indirir; kurulum klasörü bir Git deposu olmasa da çalışır. Uygulama dosyalarını yeniler, bağımlılıkları kurar, derleme yapar ve varsa systemd servisini yeniden başlatır. data/, backups/, .env dosyaları ve node_modules/ korunur. Yerel kod değişikliklerinin üzerine yazılabilir. PWA kurulumu HTTPS ve uyumlu tarayıcı gerektirir; MIT lisansı.

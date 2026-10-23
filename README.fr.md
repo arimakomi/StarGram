@@ -56,7 +56,7 @@ sudo stargram update
 sudo stargram help
 ~~~
 
-update peut remplacer le code modifié localement ; sauvegardez les données avant. Le stockage JSON local se trouve dans data/stargram_db.json. Le panneau permet l’exportation et la restauration des sauvegardes.
+update télécharge directement depuis GitHub l’archive de la branche main ; il fonctionne donc même si le dossier d’installation n’est pas un dépôt Git. Il remplace les fichiers de l’application, installe les dépendances, effectue le build et redémarre systemd si disponible. Il conserve data/, backups/, les fichiers .env et node_modules/. Les modifications locales du code peuvent être remplacées.
 
 ## PWA et sécurité
 
