@@ -4,9 +4,10 @@
 # حالت بدون پرسش: PORT=3000 ADMIN_USER=admin ADMIN_PASS=... DB_HOST=... DB_NAME=... DB_USER=... DB_PASS=... NONINTERACTIVE=1 sudo -E bash setup.sh
 set -euo pipefail
 
-APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SERVICE_NAME="stargram"
-cd "$APP_DIR"
+REPO_URL="${REPO_URL:-https://github.com/arimakomi/StarGram.git}"
+INSTALL_DIR="${INSTALL_DIR:-/opt/stargram}"
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || pwd)"
 
 c_red=$'\e[31m'; c_grn=$'\e[32m'; c_ylw=$'\e[33m'; c_blu=$'\e[34m'; c_off=$'\e[0m'
 info() { echo "${c_blu}➜${c_off} $*"; }
@@ -15,6 +16,27 @@ warn() { echo "${c_ylw}!${c_off} $*"; }
 die()  { echo "${c_red}✘ $*${c_off}" >&2; exit 1; }
 
 NONINTERACTIVE="${NONINTERACTIVE:-0}"
+
+# ───────── نصب با یک خط: اگر کنار سورس پروژه اجرا نشده، اول پروژه را دریافت می‌کنیم ─────────
+if ! { [[ -f "$SELF_DIR/server.js" ]] && grep -q '"name": "stargram"' "$SELF_DIR/package.json" 2>/dev/null; }; then
+  [[ $EUID -eq 0 ]] || die "این اسکریپت باید با root اجرا شود."
+  if ! command -v git >/dev/null 2>&1; then
+    info "نصب git…"
+    if command -v dnf >/dev/null 2>&1; then dnf install -y git
+    elif command -v yum >/dev/null 2>&1; then yum install -y git
+    elif command -v apt-get >/dev/null 2>&1; then apt-get update -qq && apt-get install -y git
+    else die "git نصب نیست."; fi
+  fi
+  if [[ -d "$INSTALL_DIR/.git" ]]; then
+    info "به‌روزرسانی سورس در $INSTALL_DIR …"; git -C "$INSTALL_DIR" pull --ff-only
+  else
+    info "دریافت StarGram در $INSTALL_DIR …"; git clone --depth 1 "$REPO_URL" "$INSTALL_DIR"
+  fi
+  if [[ "${NONINTERACTIVE:-0}" != "1" && -r /dev/tty ]]; then exec bash "$INSTALL_DIR/setup.sh" < /dev/tty; fi
+  exec bash "$INSTALL_DIR/setup.sh"
+fi
+APP_DIR="$SELF_DIR"
+cd "$APP_DIR"
 
 ask() { # ask VAR "متن" "پیش‌فرض"
   local var="$1" prompt="$2" def="${3:-}" val

@@ -23,13 +23,13 @@ StarGram یک پیام‌رسان وب با ظاهر الهام‌گرفته ا�
 
 ## 🚀 نصب سریع (پیشنهادی)
 
-روی سرور لینوکسی (AlmaLinux / Rocky / CentOS / Ubuntu / Debian) با دسترسی root:
+روی سرور لینوکسی (AlmaLinux / Rocky / CentOS / Ubuntu / Debian) با دسترسی root فقط یک خط:
 
 ```bash
-git clone https://github.com/arimakomi/StarGram.git
-cd StarGram
-sudo bash setup.sh
+bash <(curl -fsSL https://raw.githubusercontent.com/arimakomi/StarGram/main/setup.sh)
 ```
+
+(پروژه در `/opt/stargram` دریافت می‌شود؛ مسیر دیگر: `INSTALL_DIR=/path` قبل از دستور.)
 
 اسکریپت به‌ترتیب این کارها را انجام می‌دهد:
 
