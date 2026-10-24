@@ -17,6 +17,7 @@ The Pages site hosts project information and documentation only. Run the messeng
 
 - Private and group chats, channels, search, replies, editing, reactions, and pinned messages
 - Image and voice messages, stories, and browser notifications
+- Authenticated real-time chat change events with reconnect handling and a polling fallback
 - User, report, group, channel, branding, API token, and system configuration management
 - Themes and chat wallpapers; default avatars are generated locally as SVG
 - PostgreSQL and MySQL/MariaDB, with local JSON storage as a fallback

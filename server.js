@@ -499,6 +499,33 @@ const app = express();
 app.disable('x-powered-by');
 app.set('trust proxy', 'loopback');
 app.use(express.json({ limit: '50mb' }));
+
+const syncStreamsByUser = new Map();
+
+function writeSyncEvent(res, payload) {
+  if (res.writableEnded || res.destroyed) return;
+  try {
+    res.write(`data: ${JSON.stringify(payload)}\n\n`);
+  } catch {
+    res.destroy();
+  }
+}
+
+function notifyChatChanged(chat, previousChat = null) {
+  const participantIds = new Set([
+    ...(Array.isArray(chat?.participantIds) ? chat.participantIds : []),
+    ...(Array.isArray(previousChat?.participantIds) ? previousChat.participantIds : [])
+  ]);
+  if (!participantIds.size) return;
+
+  for (const userId of participantIds) {
+    const streams = syncStreamsByUser.get(userId);
+    if (!streams) continue;
+    for (const res of streams) {
+      writeSyncEvent(res, { type: 'chat_changed', chatId: chat.id });
+    }
+  }
+}
 app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
@@ -640,6 +667,40 @@ async function auth(req, res, next) {
 }
 
 app.get('/api/auth/me', auth, (req, res) => res.json({ success: true, user: publicUser(req.user) }));
+
+app.get('/api/sync/events', auth, (req, res) => {
+  const userId = req.user.id;
+  const streams = syncStreamsByUser.get(userId) || new Set();
+  streams.add(res);
+  syncStreamsByUser.set(userId, streams);
+
+  res.status(200).set({
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'Cache-Control': 'no-cache, no-transform',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no'
+  });
+  res.flushHeaders();
+  res.write('retry: 1000\n');
+  writeSyncEvent(res, { type: 'ready' });
+
+  const heartbeat = setInterval(() => {
+    if (!res.writableEnded && !res.destroyed) {
+      try { res.write(': keep-alive\n\n'); } catch { res.destroy(); }
+    }
+  }, 20000);
+  const maxLifetime = setTimeout(() => res.end(), 10 * 60 * 1000);
+  const cleanup = () => {
+    clearInterval(heartbeat);
+    clearTimeout(maxLifetime);
+    streams.delete(res);
+    if (streams.size === 0) syncStreamsByUser.delete(userId);
+  };
+
+  res.on('close', cleanup);
+  res.on('error', cleanup);
+});
+
 app.post('/api/auth/logout', auth, wrap(async (req, res) => {
   const user = await dbAdapter.getDoc('users', req.user.id);
   if (user) {
@@ -705,8 +766,10 @@ app.post('/api/db/:collection/batch', auth, wrap(async (req, res) => {
   for (const [id, incoming] of Object.entries(upserts)) {
     if (id.length > 191 || !incoming || typeof incoming !== 'object') continue;
     let data = incoming;
+    let previousChat = null;
     if (c === 'chats') {
       const existingChat = await dbAdapter.getDoc('chats', id);
+      previousChat = existingChat;
       const was = existingChat ? existingChat.participantIds : null;
       const member = (arr) => Array.isArray(arr) && arr.includes(req.user.id);
       if (!(member(incoming.participantIds) && (!was || member(was))) && !(was && member(was))) continue;
@@ -730,6 +793,7 @@ app.post('/api/db/:collection/batch', auth, wrap(async (req, res) => {
       }
     }
     await dbAdapter.putDoc(c, id, data, now);
+    if (c === 'chats') notifyChatChanged(data, previousChat);
   }
 
   for (const id of deletes) {
@@ -739,6 +803,9 @@ app.post('/api/db/:collection/batch', auth, wrap(async (req, res) => {
     if (c === 'chats') {
       const cur = await dbAdapter.getDoc('chats', id);
       if (!cur || !(Array.isArray(cur.participantIds) && cur.participantIds.includes(req.user.id))) continue;
+      await dbAdapter.deleteDoc(c, id, now);
+      notifyChatChanged(cur);
+      continue;
     }
     await dbAdapter.deleteDoc(c, id, now);
   }
@@ -1041,6 +1108,7 @@ app.post('/api/v1/admin/broadcast', auth, wrap(async (req, res) => {
       if (!chat.pinnedMessageIds.includes(broadcastMsg.id)) chat.pinnedMessageIds.push(broadcastMsg.id);
     }
     await dbAdapter.putDoc('chats', chat.id, chat, now);
+    notifyChatChanged(chat);
     affected++;
   }
 
@@ -1195,6 +1263,7 @@ app.post('/api/v1/chats', auth, wrap(async (req, res) => {
   };
 
   await dbAdapter.putDoc('chats', id, newChat, now);
+  notifyChatChanged(newChat);
   res.status(201).json({ success: true, message: 'گفتگو یا کانال با موفقیت ساخته شد.', chat: newChat });
 }));
 
@@ -1214,6 +1283,7 @@ app.delete('/api/v1/chats/:id', auth, wrap(async (req, res) => {
     return res.status(403).json({ success: false, message: 'فقط سازنده یا مدیر می‌تواند گفتگو را حذف کند.' });
   }
   await dbAdapter.deleteDoc('chats', req.params.id, Date.now());
+  notifyChatChanged(chat);
   res.json({ success: true, message: 'گفتگو حذف گردید.' });
 }));
 
@@ -1268,6 +1338,7 @@ app.post('/api/v1/chats/:id/messages', auth, wrap(async (req, res) => {
   chat.unreadCount = (chat.unreadCount || 0) + 1;
 
   await dbAdapter.putDoc('chats', req.params.id, chat, now);
+  notifyChatChanged(chat);
   res.status(201).json({ success: true, message: 'پیام با موفقیت ارسال شد.', messageData: newMsg });
 }));
 
@@ -1291,6 +1362,7 @@ app.delete('/api/v1/chats/:id/messages/:msgId', auth, wrap(async (req, res) => {
   }
 
   await dbAdapter.putDoc('chats', req.params.id, chat, Date.now());
+  notifyChatChanged(chat);
   res.json({ success: true, message: 'پیام حذف شد.' });
 }));
 
@@ -1317,6 +1389,7 @@ app.post('/api/v1/chats/:id/messages/:msgId/reactions', auth, wrap(async (req, r
   }
 
   await dbAdapter.putDoc('chats', req.params.id, chat, Date.now());
+  notifyChatChanged(chat);
   res.json({ success: true, reactions: msg.reactions });
 }));
 

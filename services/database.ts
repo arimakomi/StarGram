@@ -68,6 +68,7 @@ function notifyCollectionListeners(collectionName: string) {
 const memoryStore = new Map<string, Record<string, any>>();
 const SYNC_COLLECTIONS = ['users', 'chats', 'stories', 'system_config', 'reports'];
 const POLL_MS = 2500;
+const CONNECTED_POLL_MS = 10000;
 
 // آخرین نسخه‌ی همگام‌شده با سرور (JSON هر سند) برای تشخیص تغییرات
 const synced = new Map<string, Record<string, string>>();
@@ -75,6 +76,12 @@ const sinceMap = new Map<string, number>();
 const pushTimers = new Map<string, any>();
 let pollTimer: any = null;
 let syncActive = false;
+let eventStreamController: AbortController | null = null;
+let eventReconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let eventReconnectAttempts = 0;
+let eventStreamConnected = false;
+let chatPullInProgress = false;
+let chatPullAgain = false;
 
 function getCollectionStore(collectionName: string): Record<string, any> {
   let s = memoryStore.get(collectionName);
@@ -105,7 +112,7 @@ async function api(path: string, init?: RequestInit) {
 function schedulePush(collectionName: string) {
   if (!syncActive) return;
   clearTimeout(pushTimers.get(collectionName));
-  pushTimers.set(collectionName, setTimeout(() => pushCollection(collectionName), 250));
+  pushTimers.set(collectionName, setTimeout(() => pushCollection(collectionName), 80));
 }
 
 async function pushCollection(collectionName: string) {
@@ -160,6 +167,87 @@ async function pullCollection(collectionName: string, full: boolean) {
   if (changed) emitChange(collectionName, false);
 }
 
+async function refreshChatsFromEvent() {
+  if (chatPullInProgress) {
+    chatPullAgain = true;
+    return;
+  }
+  chatPullInProgress = true;
+  try {
+    do {
+      chatPullAgain = false;
+      await pullCollection('chats', false);
+    } while (chatPullAgain && syncActive);
+  } catch (e) {
+    console.warn('Chat event sync failed; polling will retry.', e);
+  } finally {
+    chatPullInProgress = false;
+  }
+}
+
+function scheduleEventReconnect(delayMs: number) {
+  if (!syncActive || eventReconnectTimer) return;
+  eventReconnectTimer = setTimeout(() => {
+    eventReconnectTimer = null;
+    void connectEventStream();
+  }, delayMs);
+}
+
+async function connectEventStream() {
+  if (!syncActive || eventStreamController) return;
+  const token = getToken();
+  if (!token) return;
+
+  const controller = new AbortController();
+  eventStreamController = controller;
+  try {
+    const response = await fetch('/api/sync/events', {
+      headers: { Authorization: `Bearer ${token}`, Accept: 'text/event-stream' },
+      signal: controller.signal,
+      cache: 'no-store'
+    });
+    if (!response.ok || !response.body) throw new Error(`Event stream HTTP ${response.status}`);
+
+    eventReconnectAttempts = 0;
+    eventStreamConnected = true;
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    while (syncActive && !controller.signal.aborted) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const frames = buffer.split(/\r?\n\r?\n/);
+      buffer = frames.pop() || '';
+      for (const frame of frames) {
+        const dataLine = frame.split(/\r?\n/).find(line => line.startsWith('data:'));
+        if (!dataLine) continue;
+        try {
+          const event = JSON.parse(dataLine.slice(5).trim());
+          if (event.type === 'chat_changed') void refreshChatsFromEvent();
+        } catch {
+          // Ignore malformed event frames and let the next event or fallback poll recover.
+        }
+      }
+    }
+    reader.releaseLock();
+  } catch (e) {
+    if (syncActive && !controller.signal.aborted) {
+      console.warn('Realtime sync disconnected; reconnecting.', e);
+    }
+  } finally {
+    if (eventStreamController === controller) eventStreamController = null;
+    eventStreamConnected = false;
+    if (syncActive) {
+      clearTimeout(pollTimer);
+      pollTimer = setTimeout(pollAll, POLL_MS);
+      const delay = Math.min(1000 * (2 ** eventReconnectAttempts), 15000);
+      eventReconnectAttempts += 1;
+      scheduleEventReconnect(delay);
+    }
+  }
+}
+
 async function pollAll() {
   if (!syncActive) return;
   try {
@@ -167,7 +255,7 @@ async function pollAll() {
   } catch (e) {
     console.warn('Sync poll failed', e);
   }
-  if (syncActive) pollTimer = setTimeout(pollAll, POLL_MS);
+  if (syncActive) pollTimer = setTimeout(pollAll, eventStreamConnected ? CONNECTED_POLL_MS : POLL_MS);
 }
 
 /** بعد از ورود صدا زده می‌شود: دریافت کامل داده‌ها از دیتابیس و شروع همگام‌سازی */
@@ -176,12 +264,19 @@ export async function startSync(): Promise<void> {
   memoryStore.clear(); synced.clear(); sinceMap.clear();
   await Promise.all(SYNC_COLLECTIONS.map(c => pullCollection(c, true)));
   syncActive = true;
+  void connectEventStream();
   pollTimer = setTimeout(pollAll, POLL_MS);
 }
 
 export function stopSync() {
   syncActive = false;
   clearTimeout(pollTimer);
+  if (eventReconnectTimer) clearTimeout(eventReconnectTimer);
+  eventReconnectTimer = null;
+  eventReconnectAttempts = 0;
+  eventStreamConnected = false;
+  eventStreamController?.abort();
+  eventStreamController = null;
   pushTimers.forEach(t => clearTimeout(t));
   pushTimers.clear();
   memoryStore.clear(); synced.clear(); sinceMap.clear();
