@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#09121d">
+  <meta name="description" content="مستندات کامل REST API پیام‌رسان استارلی چت (StarGram) برای توسعه‌دهندگان، ساخت کلاینت‌های اختصاصی، ربات‌ها و ابزارهای اتوماسیون.">
+  <title>مستندات کامل API و کلیدهای دسترسی | راهنمای StarGram</title>
+  <link rel="icon" href="../assets/stargram-logo.png" type="image/png">
+  <link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="shell nav">
+      <a class="brand" href="../">
+        <img class="brand-logo" src="../assets/stargram-logo.png" alt="لوگوی StarGram">
+        <span>StarGram</span>
+      </a>
+      <nav class="nav-links" aria-label="ناوبری">
+        <a href="../#features">امکانات</a>
+        <a href="../#install">نصب سرور</a>
+        <a class="button secondary" href="./index.html">مرکز راهنما</a>
+        <a href="https://github.com/arimakomi/StarGram">GitHub ↗</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="shell">
+    <section class="section help-intro">
+      <span class="eyebrow">مستندات فنی توسعه‌دهندگان <span class="badge">API v1</span></span>
+      <h1>مستندات کامل REST API و کلیدهای دسترسی</h1>
+      <p class="lead">
+        با استفاده از API قدرتمند و امن StarGram، می‌توانید کلاینت‌های دسکتاپ و موبایل سفارشی بسازید، ربات‌های هوشمند و خبرخوان متصل کنید و پیام‌رسان را به صورت کاملاً برنامه‌ریزی‌شده مدیریت نمایید.
+      </p>
+    </section>
+
+    <div class="help-layout">
+      <aside class="toc" aria-label="فهرست راهنما">
+        <strong>راهنمای StarGram</strong>
+        <a href="./index.html">نمای کلی و فهرست</a>
+        <a href="./api.html" aria-current="page">مستندات کامل API v1</a>
+        <a href="./install.html">نصب و استقرار</a>
+        <a href="./account.html">حساب و گفتگوهای خصوصی</a>
+        <a href="./groups.html">گروه‌ها</a>
+        <a href="./channels.html">کانال‌ها</a>
+        <a href="./messages.html">پیام‌ها و محتوا</a>
+        <a href="./settings.html">تنظیمات و وب‌اپ</a>
+        <a href="./server.html">مدیریت سرور</a>
+        <a href="./security.html">امنیت و رفع اشکال</a>
+      </aside>
+
+      <article class="doc">
+        <section>
+          <h2>۱. اصول پایه و نشانی سرور (Base URL)</h2>
+          <p>
+            کلیه ارتباطات با API پیام‌رسان از طریق پروتکل استاندارد HTTP/HTTPS با تبادل داده در قالب <code>JSON</code> صورت می‌گیرد.
+          </p>
+          <div class="callout">
+            <strong>آدرس پایه در سرور محلی یا سرور اختصاصی:</strong><br>
+            <code>http://localhost:3000/api/v1</code> یا <code>https://chat.yourdomain.com/api/v1</code>
+          </div>
+          <p>
+            تمام درخواست‌های ارسالی با متد <code>POST</code>، <code>PATCH</code> یا <code>DELETE</code> باید دارای هدر <code>Content-Type: application/json</code> باشند.
+          </p>
+        </section>
+
+        <section style="margin-top:2rem">
+          <h2>۲. احراز هویت و توکن‌های امن (Authentication)</h2>
+          <p>
+            تمام اندپوینت‌های مدیریتی و دسترسی به اطلاعات با توکن‌های امن و طولانی محافظت می‌شوند. احراز هویت از طریق استاندارد <strong>Bearer Token</strong> در هدر <code>Authorization</code> درخواست‌ها صورت می‌گیرد:
+          </p>
+          <pre><code>Authorization: Bearer stg_live_8f3a9b1c7e...</code></pre>
+
+          <h3>شیوه ساخت کلید در پنل مدیریت</h3>
+          <ol>
+            <li>با حساب مدیر وارد پیام‌رسان شوید.</li>
+            <li>از منوی کناری (سه خط) گزینه <strong>«پنل مدیریت سیستم»</strong> را باز کنید.</li>
+            <li>به برگه <strong>«مدیریت API و توکن‌ها»</strong> بروید.</li>
+            <li>روی دکمه <strong>«تولید توکن امن جدید»</strong> کلیک کرده، نام کاربری یا هدف کلید را وارد کرده و مدت اعتبار را مشخص کنید.</li>
+            <li>کلید تولیدشده ۶۴ کاراکتری را همان لحظه کپی کرده و ذخیره نمایید.</li>
+          </ol>
+        </section>
+
+        <section style="margin-top:2rem">
+          <h2>۳. فهرست اندپوینت‌های API v1</h2>
+
+          <h3>الف) پایش و مدیریت سیستم (System & Admin)</h3>
+          <table class="api-table" style="width:100%; border-collapse:collapse; margin-top:1rem; font-size:13px">
+            <thead>
+              <tr style="border-bottom:2px solid #242f3d; text-align:right">
+                <th style="padding:8px">متد</th>
+                <th style="padding:8px">مسیر</th>
+                <th style="padding:8px">توضیحات</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr style="border-bottom:1px solid #242f3d">
+                <td style="padding:8px"><code style="color:#10b981">GET</code></td>
+                <td style="padding:8px"><code>/api/v1/admin/stats</code></td>
+                <td style="padding:8px">آمار زنده: شمار کاربران، چت‌ها، پیام‌ها، آپتایم و وضعیت دیتابیس</td>
+              </tr>
+              <tr style="border-bottom:1px solid #242f3d">
+                <td style="padding:8px"><code style="color:#10b981">GET</code></td>
+                <td style="padding:8px"><code>/api/v1/admin/config</code></td>
+                <td style="padding:8px">دریافت تنظیمات برند (نام، لوگوها، شعار) و محدودیت‌های ثبت‌نام</td>
+              </tr>
+              <tr style="border-bottom:1px solid #242f3d">
+                <td style="padding:8px"><code style="color:#f59e0b">PATCH</code></td>
+                <td style="padding:8px"><code>/api/v1/admin/config</code></td>
+                <td style="padding:8px">به‌روزرسانی نام برنامه، شعار، آیکون مینیمال، لوگوی کامل و سوئیچ‌ها</td>
+              </tr>
+              <tr style="border-bottom:1px solid #242f3d">
+                <td style="padding:8px"><code style="color:#3b82f6">POST</code></td>
+                <td style="padding:8px"><code>/api/v1/admin/broadcast</code></td>
+                <td style="padding:8px">ارسال پیام سراسری اعلان (Broadcast) به تمام کانال‌ها و گروه‌ها</td>
+              </tr>
+              <tr style="border-bottom:1px solid #242f3d">
+                <td style="padding:8px"><code style="color:#10b981">GET</code></td>
+                <td style="padding:8px"><code>/api/v1/admin/tokens</code></td>
+                <td style="padding:8px">دریافت فهرست توکن‌های فعال API و زمان آخرین استفاده</td>
+              </tr>
+              <tr style="border-bottom:1px solid #242f3d">
+                <td style="padding:8px"><code style="color:#3b82f6">POST</code></td>
+                <td style="padding:8px"><code>/api/v1/admin/tokens</code></td>
+                <td style="padding:8px">تولید توکن جدید امن با نام و مدت اعتبار</td>
+              </tr>
+              <tr style="border-bottom:1px solid #242f3d">
+                <td style="padding:8px"><code style="color:#ef4444">DELETE</code></td>
+                <td style="padding:8px"><code>/api/v1/admin/tokens/:id</code></td>
+                <td style="padding:8px">باطل‌سازی و حذف دائم یک توکن API</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <h3 style="margin-top:2rem">ب) مدیریت کاربران (Users)</h3>
+          <table class="api-table" style="width:100%; border-collapse:collapse; margin-top:1rem; font-size:13px">
+            <thead>
+              <tr style="border-bottom:2px solid #242f3d; text-align:right">
+                <th style="padding:8px">متد</th>
+                <th style="padding:8px">مسیر</th>
+                <th style="padding:8px">توضیحات</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr style="border-bottom:1px solid #242f3d">
+                <td style="padding:8px"><code style="color:#10b981">GET</code></td>
+                <td style="padding:8px"><code>/api/v1/users</code></td>
+                <td style="padding:8px">لیست کاربران با پشتیبانی از فیلتر <code>search</code>, <code>role</code>, <code>limit</code></td>
+              </tr>
+              <tr style="border-bottom:1px solid #242f3d">
+                <td style="padding:8px"><code style="color:#10b981">GET</code></td>
+                <td style="padding:8px"><code>/api/v1/users/:id</code></td>
+                <td style="padding:8px">مشاهده مشخصات یک کاربر خاص بر اساس شناسه یا نام کاربری</td>
+              </tr>
+              <tr style="border-bottom:1px solid #242f3d">
+                <td style="padding:8px"><code style="color:#3b82f6">POST</code></td>
+                <td style="padding:8px"><code>/api/v1/users</code></td>
+                <td style="padding:8px">ساخت مستقیم کاربر جدید (با تعیین نقش user یا admin)</td>
+              </tr>
+              <tr style="border-bottom:1px solid #242f3d">
+                <td style="padding:8px"><code style="color:#f59e0b">PATCH</code></td>
+                <td style="padding:8px"><code>/api/v1/users/:id</code></td>
+                <td style="padding:8px">ویرایش نام نمایشی، بیوگرافی، مسدودسازی، تغییر نقش یا تغییر رمز</td>
+              </tr>
+              <tr style="border-bottom:1px solid #242f3d">
+                <td style="padding:8px"><code style="color:#ef4444">DELETE</code></td>
+                <td style="padding:8px"><code>/api/v1/users/:id</code></td>
+                <td style="padding:8px">حذف کاربر از سیستم</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <h3 style="margin-top:2rem">ج) چت‌ها، گروه‌ها و کانال‌ها (Chats)</h3>
+          <table class="api-table" style="width:100%; border-collapse:collapse; margin-top:1rem; font-size:13px">
+            <thead>
+              <tr style="border-bottom:2px solid #242f3d; text-align:right">
+                <th style="padding:8px">متد</th>
+                <th style="padding:8px">مسیر</th>
+                <th style="padding:8px">توضیحات</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr style="border-bottom:1px solid #242f3d">
+                <td style="padding:8px"><code style="color:#10b981">GET</code></td>
+                <td style="padding:8px"><code>/api/v1/chats</code></td>
+                <td style="padding:8px">فهرست گفتگوها (با فیلتر نوع <code>private</code>, <code>group</code>, <code>channel</code>)</td>
+              </tr>
+              <tr style="border-bottom:1px solid #242f3d">
+                <td style="padding:8px"><code style="color:#3b82f6">POST</code></td>
+                <td style="padding:8px"><code>/api/v1/chats</code></td>
+                <td style="padding:8px">ایجاد گفتگوی خصوصی جدید، گروه یا کانال همراه با اعضا</td>
+              </tr>
+              <tr style="border-bottom:1px solid #242f3d">
+                <td style="padding:8px"><code style="color:#10b981">GET</code></td>
+                <td style="padding:8px"><code>/api/v1/chats/:id</code></td>
+                <td style="padding:8px">دریافت جزئیات گفتگو، اعضا و آخرین وضعیت</td>
+              </tr>
+              <tr style="border-bottom:1px solid #242f3d">
+                <td style="padding:8px"><code style="color:#ef4444">DELETE</code></td>
+                <td style="padding:8px"><code>/api/v1/chats/:id</code></td>
+                <td style="padding:8px">حذف یک گفتگو یا کانال</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <h3 style="margin-top:2rem">د) ارسال و مدیریت پیام‌ها (Messages)</h3>
+          <table class="api-table" style="width:100%; border-collapse:collapse; margin-top:1rem; font-size:13px">
+            <thead>
+              <tr style="border-bottom:2px solid #242f3d; text-align:right">
+                <th style="padding:8px">متد</th>
+                <th style="padding:8px">مسیر</th>
+                <th style="padding:8px">توضیحات</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr style="border-bottom:1px solid #242f3d">
+                <td style="padding:8px"><code style="color:#10b981">GET</code></td>
+                <td style="padding:8px"><code>/api/v1/chats/:id/messages</code></td>
+                <td style="padding:8px">دریافت تاریخچه پیام‌ها با صفحه‌بندی (<code>limit</code>, <code>before</code>)</td>
+              </tr>
+              <tr style="border-bottom:1px solid #242f3d">
+                <td style="padding:8px"><code style="color:#3b82f6">POST</code></td>
+                <td style="padding:8px"><code>/api/v1/chats/:id/messages</code></td>
+                <td style="padding:8px">ارسال پیام متنی، تصویر، صدا، نظرسنجی یا پاسخ (Reply)</td>
+              </tr>
+              <tr style="border-bottom:1px solid #242f3d">
+                <td style="padding:8px"><code style="color:#ef4444">DELETE</code></td>
+                <td style="padding:8px"><code>/api/v1/chats/:id/messages/:msgId</code></td>
+                <td style="padding:8px">حذف پیام مشخص</td>
+              </tr>
+              <tr style="border-bottom:1px solid #242f3d">
+                <td style="padding:8px"><code style="color:#3b82f6">POST</code></td>
+                <td style="padding:8px"><code>/api/v1/chats/:id/messages/:msgId/reactions</code></td>
+                <td style="padding:8px">ثبت واکنش ایموجی (مانند ❤️, 👍, 🔥) روی پیام</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <h3 style="margin-top:2rem">هـ) احراز هویت کلاینت‌ها (Auth Endpoints)</h3>
+          <p>برای ساخت اپلیکیشن‌هایی که کاربران وارد حساب خود می‌شوند:</p>
+          <pre><code>POST /api/v1/auth/login
+Body: { "username": "ali", "password": "MyPassword123" }
+Response: { "success": true, "token": "...", "user": { ... } }</code></pre>
+          <pre><code>POST /api/v1/auth/register
+Body: { "username": "sara", "password": "SecurePassword", "displayName": "سارا" }</code></pre>
+          <pre><code>GET /api/v1/auth/me
+Header: Authorization: Bearer &lt;USER_TOKEN&gt;</code></pre>
+        </section>
+
+        <section style="margin-top:2rem">
+          <h2>۴. نمونه کدهای عملی</h2>
+
+          <h3>۱) ارسال پیام با جاوااسکریپت (Node.js یا مرورگر)</h3>
+          <pre><code>const API_TOKEN = 'stg_live_YOUR_TOKEN_HERE';
+const BASE_URL = 'http://localhost:3000/api/v1';
+
+async function sendMessage(chatId, text) {
+  const response = await fetch(`\${BASE_URL}/chats/\${chatId}/messages`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer \${API_TOKEN}`
+    },
+    body: JSON.stringify({ text })
+  });
+  const data = await response.json();
+  console.log('پیام ارسال شد:', data);
+  return data;
+}
+
+// اجرا:
+sendMessage('ch_1742080000000_abc', 'سلام! این پیام از طریق API فرستاده شد 🚀');</code></pre>
+
+          <h3>۲) ساخت ربات اطلاع‌رسانی با پایتون (Python)</h3>
+          <pre><code>import requests
+
+API_TOKEN = "stg_live_YOUR_TOKEN_HERE"
+BASE_URL = "http://localhost:3000/api/v1"
+
+headers = {
+    "Authorization": f"Bearer {API_TOKEN}",
+    "Content-Type": "application/json"
+}
+
+# دریافت آمار سیستم
+stats = requests.get(f"{BASE_URL}/admin/stats", headers=headers).json()
+print("آمار کاربران:", stats["stats"]["totalUsers"])
+
+# ارسال اطلاعیه سراسری
+payload = {
+    "title": "به‌روزرسانی سرور",
+    "message": "سرور در ساعت ۲ بامداد به مدت ۱۰ دقیقه ارتقا خواهد یافت.",
+    "target": "all"
+}
+res = requests.post(f"{BASE_URL}/admin/broadcast", json=payload, headers=headers)
+print("نتیجه ارسال سراسری:", res.json())</code></pre>
+
+          <h3>۳) آزمایش فوری با cURL در ترمینال</h3>
+          <pre><code># دریافت آمار سرور
+curl -X GET "http://localhost:3000/api/v1/admin/stats" \
+  -H "Authorization: Bearer stg_live_YOUR_TOKEN"
+
+# ارسال پیام به گفتگو
+curl -X POST "http://localhost:3000/api/v1/chats/ch_123/messages" \
+  -H "Authorization: Bearer stg_live_YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"text": "تست پیام از ترمینال لینوکس"}'</code></pre>
+        </section>
+
+        <section style="margin-top:2rem">
+          <h2>۵. کدهای وضعیت HTTP و رفع خطا</h2>
+          <ul>
+            <li><code>200 OK</code>: درخواست با موفقیت پردازش شد.</li>
+            <li><code>201 Created</code>: کاربر، گفتگو یا پیام جدید با موفقیت ایجاد گردید.</li>
+            <li><code>400 Bad Request</code>: فیلدهای الزامی (مانند متن پیام یا نام کاربری) ارسال نشده یا نامعتبر است.</li>
+            <li><code>401 Unauthorized</code>: هدر Authorization ارسال نشده، منقضی شده یا نامعتبر است.</li>
+            <li><code>403 Forbidden</code>: این عملیات نیاز به دسترسی ادمین دارد یا حساب کاربری مسدود شده است.</li>
+            <li><code>404 Not Found</code>: گفتگو، کاربر یا پیام مورد نظر در سیستم یافت نشد.</li>
+            <li><code>429 Too Many Requests</code>: تعداد تلاش‌ها برای ورود بیش از حد مجاز بوده است.</li>
+            <li><code>500 Server Error</code>: خطای داخلی در سرور یا دیتابیس رخ داده است.</li>
+          </ul>
+        </section>
+      </article>
+    </div>
+  </main>
+
+  <footer class="footer">
+    <div class="shell footer-inner">
+      <span>StarGram · راهنمای توسعه‌دهندگان API</span>
+      <span>
+        <a href="../">صفحه اصلی</a> · 
+        <a href="./index.html">همهٔ راهنماها</a> · 
+        <a href="https://github.com/arimakomi/StarGram">کد منبع</a>
+      </span>
+    </div>
+  </footer>
+  <script src="./help.js" defer></script>
+</body>
+</html>

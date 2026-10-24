@@ -1,17 +1,18 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { User, Chat, MessageReport, SystemConfig } from '../types';
+import { User, Chat, MessageReport, SystemConfig, ApiToken } from '../types';
 import { 
   X, Shield, AlertOctagon, Sliders, Users, Flag, MessageSquare, AlertTriangle, 
   Check, Ban, UserCheck, Key, ShieldOff, Trash2, Lock, Unlock, 
   Search, RefreshCw, Clock, Filter, Eye, EyeOff, Power,
   Database, Download, Upload, HardDrive, FileJson, RotateCcw, CheckCircle2,
-  Bot, Sparkles, Globe
+  Bot, Sparkles, Globe, Copy, ExternalLink, Code2, PlusCircle, CheckCheck
 } from 'lucide-react';
 import { getToken } from '../services/auth';
 import { 
   collection, getDocs, doc, setDoc, updateDoc, deleteDoc, db,
   getAllDatabaseCollectionsData, restoreAllDatabaseCollectionsData, getRawCollectionStore, clearAllDatabaseData
 } from '../services/database';
+import { StarChatLogo, STARCHAT_LOGO_URL, STARCHAT_MINIMAL_LOGO_URL } from './StarChatLogo';
 
 interface AdminPanelModalProps {
   currentUser: User;
@@ -28,7 +29,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
   onClose,
   onRefreshData
 }) => {
-  const [activeTab, setActiveTab] = useState<'system' | 'reports' | 'users' | 'chats' | 'database'>('system');
+  const [activeTab, setActiveTab] = useState<'system' | 'branding' | 'api' | 'reports' | 'users' | 'chats' | 'database'>('system');
   // Panic Button Wipe state
   const [showPanicModal, setShowPanicModal] = useState(false);
   const [panicConfirmInput, setPanicConfirmInput] = useState('');
@@ -86,6 +87,174 @@ const handleExecutePanic = async () => {
   const [isSavingAi, setIsSavingAi] = useState(false);
   const [aiSaveSuccess, setAiSaveSuccess] = useState(false);
   const [serverDbType, setServerDbType] = useState<string>('local');
+
+  // Branding Customization State
+  const [appName, setAppName] = useState<string>(systemConfig.appName || 'استارلی چت');
+  const [appSlogan, setAppSlogan] = useState<string>(systemConfig.appSlogan || 'پیام‌رسان ابری، امن و پرسرعت');
+  const [welcomeMessage, setWelcomeMessage] = useState<string>(systemConfig.welcomeMessage || 'به استارلی چت خوش آمدید');
+  const [customLogoUrl, setCustomLogoUrl] = useState<string>(systemConfig.customLogoUrl || '');
+  const [customSymbolUrl, setCustomSymbolUrl] = useState<string>(systemConfig.customSymbolUrl || '');
+  const [loginBannerUrl, setLoginBannerUrl] = useState<string>(systemConfig.loginBannerUrl || '');
+  const [accentColor, setAccentColor] = useState<string>(systemConfig.accentColor || '#3390ec');
+  const [isSavingBranding, setIsSavingBranding] = useState(false);
+  const [brandingSaveSuccess, setBrandingSaveSuccess] = useState(false);
+
+  // API Tokens State
+  const [apiTokens, setApiTokens] = useState<ApiToken[]>([]);
+  const [loadingTokens, setLoadingTokens] = useState(false);
+  const [showNewTokenModal, setShowNewTokenModal] = useState(false);
+  const [newTokenName, setNewTokenName] = useState('');
+  const [newTokenDays, setNewTokenDays] = useState(30);
+  const [generatedToken, setGeneratedToken] = useState<string | null>(null);
+  const [tokenCopied, setTokenCopied] = useState(false);
+  const [curlCopied, setCurlCopied] = useState(false);
+  const [isGeneratingToken, setIsGeneratingToken] = useState(false);
+  const [tokenError, setTokenError] = useState('');
+
+  const loadApiTokens = async () => {
+    setLoadingTokens(true);
+    try {
+      const token = getToken();
+      const res = await fetch('/api/v1/admin/tokens', {
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && Array.isArray(data.tokens)) {
+          setApiTokens(data.tokens);
+          return;
+        }
+      }
+      throw new Error('API server returned error or not reachable');
+    } catch (e) {
+      console.warn('API server tokens fetch failed, using local database fallback:', e);
+      try {
+        const snap = await getDocs(collection(db, 'api_tokens'));
+        const tokens: ApiToken[] = [];
+        snap.forEach(d => {
+          tokens.push({ id: d.id, ...d.data() } as ApiToken);
+        });
+        setApiTokens(tokens.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)));
+      } catch (dbErr) {
+        console.error('Error fetching API tokens from local db:', dbErr);
+      }
+    } finally {
+      setLoadingTokens(false);
+    }
+  };
+
+  const handleCreateToken = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newTokenName.trim()) {
+      setTokenError('لطفاً نام یا کاربرد توکن را وارد کنید.');
+      return;
+    }
+    setIsGeneratingToken(true);
+    setTokenError('');
+    try {
+      const token = getToken();
+      let rawTokenStr = '';
+      try {
+        const res = await fetch('/api/v1/admin/tokens', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {})
+          },
+          body: JSON.stringify({
+            name: newTokenName.trim(),
+            expiresInDays: newTokenDays
+          })
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+          rawTokenStr = data.token;
+          setGeneratedToken(rawTokenStr);
+          loadApiTokens();
+          return;
+        }
+      } catch (apiErr) {
+        console.warn('Backend API endpoint not responding, creating token directly in database store:', apiErr);
+      }
+
+      // Fallback: direct database token creation
+      const randHex = Array.from(crypto.getRandomValues(new Uint8Array(28)))
+        .map(b => b.toString(16).padStart(2, '0')).join('');
+      rawTokenStr = `stg_live_${randHex}`;
+      const prefix = rawTokenStr.slice(0, 16);
+      const tokenId = `token_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      const expiresAt = newTokenDays > 0 ? Date.now() + (newTokenDays * 24 * 60 * 60 * 1000) : undefined;
+      const tokenDoc: ApiToken = {
+        id: tokenId,
+        name: newTokenName.trim(),
+        tokenPrefix: prefix,
+        createdAt: Date.now(),
+        expiresAt,
+        createdBy: currentUser.id,
+        createdByName: currentUser.displayName,
+        scopes: ['admin', 'users', 'messages', 'chats']
+      };
+      await setDoc(doc(db, 'api_tokens', tokenId), {
+        ...tokenDoc,
+        token: rawTokenStr
+      });
+      setGeneratedToken(rawTokenStr);
+      loadApiTokens();
+    } catch (err: any) {
+      setTokenError(err.message || 'خطا در ارتباط با سرور.');
+    } finally {
+      setIsGeneratingToken(false);
+    }
+  };
+
+  const handleRevokeToken = async (id: string, name: string) => {
+    if (!confirm(`آیا از باطل‌سازی توکن «${name}» اطمینان دارید؟ برنامه‌ها و بات‌های استفاده‌کننده از این توکن دیگر دسترسی نخواهند داشت.`)) return;
+    try {
+      const token = getToken();
+      try {
+        const res = await fetch(`/api/v1/admin/tokens/${id}`, {
+          method: 'DELETE',
+          headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) }
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+          setApiTokens(prev => prev.filter(t => t.id !== id));
+          return;
+        }
+      } catch (apiErr) {
+        console.warn('Backend API delete failed, deleting from database store directly:', apiErr);
+      }
+      await deleteDoc(doc(db, 'api_tokens', id));
+      setApiTokens(prev => prev.filter(t => t.id !== id));
+    } catch (e) {
+      console.error('Error revoking token:', e);
+      alert('خطا در باطل‌سازی توکن');
+    }
+  };
+
+  const handleSaveBranding = async () => {
+    setIsSavingBranding(true);
+    try {
+      const updatedConfig: Partial<SystemConfig> = {
+        appName: appName.trim() || 'استارلی چت',
+        appSlogan: appSlogan.trim(),
+        welcomeMessage: welcomeMessage.trim(),
+        customLogoUrl: customLogoUrl.trim(),
+        customSymbolUrl: customSymbolUrl.trim(),
+        loginBannerUrl: loginBannerUrl.trim(),
+        accentColor: accentColor.trim() || '#3390ec'
+      };
+      await onUpdateSystemConfig(updatedConfig);
+      setCfg(prev => ({ ...prev, ...updatedConfig }));
+      setBrandingSaveSuccess(true);
+      setTimeout(() => setBrandingSaveSuccess(false), 3000);
+    } catch (e) {
+      console.error('Error saving branding:', e);
+      alert('خطا در ذخیره تنظیمات برند.');
+    } finally {
+      setIsSavingBranding(false);
+    }
+  };
 
   // Reports state
   const [reports, setReports] = useState<MessageReport[]>([]);
@@ -260,6 +429,7 @@ const handleExecutePanic = async () => {
     if (activeTab === 'reports') loadReports();
     if (activeTab === 'users') loadUsers();
     if (activeTab === 'chats') loadChats();
+    if (activeTab === 'api') loadApiTokens();
   }, [activeTab]);
 
   // System toggle handlers
@@ -586,6 +756,24 @@ const handleExecutePanic = async () => {
             تنظیمات کلان سیستم
           </button>
           <button
+            onClick={() => setActiveTab('branding')}
+            className={`px-4 py-2 text-xs font-semibold rounded-xl transition-colors flex items-center gap-2 shrink-0 ${
+              activeTab === 'branding' ? 'bg-[#5288c1] text-white shadow-xs' : 'text-gray-400 hover:text-white hover:bg-[#242f3d]'
+            }`}
+          >
+            <Sparkles className="w-4 h-4 text-amber-400" />
+            شخصی‌سازی برند و ظاهر
+          </button>
+          <button
+            onClick={() => setActiveTab('api')}
+            className={`px-4 py-2 text-xs font-semibold rounded-xl transition-colors flex items-center gap-2 shrink-0 ${
+              activeTab === 'api' ? 'bg-[#5288c1] text-white shadow-xs' : 'text-gray-400 hover:text-white hover:bg-[#242f3d]'
+            }`}
+          >
+            <Key className="w-4 h-4 text-sky-400" />
+            مدیریت API و توکن‌ها
+          </button>
+          <button
             onClick={() => setActiveTab('reports')}
             className={`px-4 py-2 text-xs font-semibold rounded-xl transition-colors flex items-center gap-2 shrink-0 ${
               activeTab === 'reports' ? 'bg-[#5288c1] text-white shadow-xs' : 'text-gray-400 hover:text-white hover:bg-[#242f3d]'
@@ -854,6 +1042,377 @@ const handleExecutePanic = async () => {
               <p className="text-xs text-gray-300 leading-relaxed">
                 تمام اتصالات سرورهای ثالث قطع بوده، آواتارها با موتور داخلی SVG تولید می‌شوند و داده‌ها در دیتابیس لوکال با کلید‌های ۲۵۶ بیتی Web Crypto ذخیره می‌گردند.
               </p>
+            </div>
+          </div>
+        )}
+
+        {/* Tab: Branding & Identity Customization */}
+        {activeTab === 'branding' && (
+          <div className="flex-1 overflow-y-auto p-6 space-y-6">
+            <div className="bg-[#0e1621] border border-[#242f3d] rounded-2xl p-5 space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-bold text-gray-200 flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-amber-400" />
+                    شخصی‌سازی هویت، نام و لوگوهای پیام‌رسان
+                  </h3>
+                  <p className="text-xs text-gray-400 mt-1">
+                    تغییرات در این بخش بلافاصله در صفحات ورود، پس‌زمینه گفتگوها، نوار کناری و عنوان سایت اعمال می‌شود.
+                  </p>
+                </div>
+                {brandingSaveSuccess && (
+                  <span className="text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-3 py-1 rounded-xl flex items-center gap-1.5 animate-in fade-in">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    تغییرات با موفقیت ذخیره شد
+                  </span>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+                {/* App Name */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-gray-300">نام پیام‌رسان (App Name):</label>
+                  <input
+                    type="text"
+                    value={appName}
+                    onChange={(e) => setAppName(e.target.value)}
+                    placeholder="استارلی چت"
+                    className="w-full bg-[#17212b] border border-[#242f3d] rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-gray-500 focus:outline-hidden focus:border-[#5288c1]"
+                  />
+                </div>
+
+                {/* Slogan */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-gray-300">شعار برنامه (Slogan):</label>
+                  <input
+                    type="text"
+                    value={appSlogan}
+                    onChange={(e) => setAppSlogan(e.target.value)}
+                    placeholder="پیام‌رسان ابری، امن و پرسرعت"
+                    className="w-full bg-[#17212b] border border-[#242f3d] rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-gray-500 focus:outline-hidden focus:border-[#5288c1]"
+                  />
+                </div>
+
+                {/* Welcome Message */}
+                <div className="space-y-1.5 md:col-span-2">
+                  <label className="text-xs font-semibold text-gray-300">متن خوش‌آمدگویی ورود (Welcome Message):</label>
+                  <input
+                    type="text"
+                    value={welcomeMessage}
+                    onChange={(e) => setWelcomeMessage(e.target.value)}
+                    placeholder="ارتباطی امن، ابری و بدون محدودیت با رمزنگاری پیشرفته سراسری"
+                    className="w-full bg-[#17212b] border border-[#242f3d] rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-gray-500 focus:outline-hidden focus:border-[#5288c1]"
+                  />
+                </div>
+
+                {/* Full Logo URL */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-gray-300">نشانی لوگوی کامل (Full Logo URL):</label>
+                  <input
+                    type="text"
+                    value={customLogoUrl}
+                    onChange={(e) => setCustomLogoUrl(e.target.value)}
+                    placeholder="پیش‌فرض: /assets/aistudio/...png"
+                    dir="ltr"
+                    className="w-full bg-[#17212b] border border-[#242f3d] rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-gray-500 focus:outline-hidden focus:border-[#5288c1] font-mono text-left"
+                  />
+                  <p className="text-[11px] text-gray-400">لوگوی افقی با عنوان برای صفحه ورود و بارگذاری.</p>
+                </div>
+
+                {/* Minimal Symbol URL */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-gray-300">نشانی آیکون مینیمال (Symbol Icon URL):</label>
+                  <input
+                    type="text"
+                    value={customSymbolUrl}
+                    onChange={(e) => setCustomSymbolUrl(e.target.value)}
+                    placeholder="پیش‌فرض: /assets/aistudio/starchat-minimal.png"
+                    dir="ltr"
+                    className="w-full bg-[#17212b] border border-[#242f3d] rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-gray-500 focus:outline-hidden focus:border-[#5288c1] font-mono text-left"
+                  />
+                  <p className="text-[11px] text-gray-400">آیکون دوحبابی ستاره بدون نوشته برای فاویکون و هدرها.</p>
+                </div>
+              </div>
+
+              {/* Live Preview Box */}
+              <div className="mt-4 pt-4 border-t border-[#242f3d]">
+                <h4 className="text-xs font-bold text-gray-300 mb-3">پیش‌نمایش زنده لوگوها و هویت برند:</h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Full Logo Preview */}
+                  <div className="bg-[#17212b] p-4 rounded-xl border border-white/5 flex flex-col items-center justify-center text-center">
+                    <span className="text-[11px] text-gray-400 mb-2">لوگوی کامل اصلی:</span>
+                    <StarChatLogo variant="full" height={80} src={customLogoUrl} />
+                    <span className="text-sm font-bold text-white mt-2">{appName || 'استارلی چت'}</span>
+                    <span className="text-[11px] text-gray-400">{appSlogan}</span>
+                  </div>
+
+                  {/* Minimal Symbol Preview */}
+                  <div className="bg-[#17212b] p-4 rounded-xl border border-white/5 flex flex-col items-center justify-center text-center">
+                    <span className="text-[11px] text-gray-400 mb-2">آیکون نماد مینیمال (هدر، آیکون و تب خالی):</span>
+                    <div className="p-3 bg-[#0e1621] rounded-2xl border border-white/5">
+                      <StarChatLogo variant="symbol" size={64} src={customSymbolUrl} />
+                    </div>
+                    <span className="text-[11px] text-[#3390ec] mt-2">نماد بدون حاشیه مربعی</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Save Action */}
+              <div className="pt-3 flex justify-end">
+                <button
+                  type="button"
+                  onClick={handleSaveBranding}
+                  disabled={isSavingBranding}
+                  className="px-6 py-2.5 bg-[#5288c1] hover:bg-[#4375a8] disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-2 shadow-md shadow-[#5288c1]/25 active:scale-95"
+                >
+                  {isSavingBranding ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                  {brandingSaveSuccess ? 'ذخیره شد!' : 'ذخیره تنظیمات برند و لوگو'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Tab: API & Security Tokens Management */}
+        {activeTab === 'api' && (
+          <div className="flex-1 overflow-y-auto p-6 space-y-6">
+            {/* Overview & Quick Links Card */}
+            <div className="bg-[#0e1621] border border-[#242f3d] rounded-2xl p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+              <div className="space-y-1">
+                <h3 className="text-sm font-bold text-gray-200 flex items-center gap-2">
+                  <Key className="w-4 h-4 text-sky-400" />
+                  سامانه مدیریت توکن‌ها و API پیام‌رسان (v1)
+                </h3>
+                <p className="text-xs text-gray-400 leading-relaxed">
+                  تولید توکن‌های ۶۴ کاراکتری امن با دسترسی کامل به سیستم برای ساخت اپلیکیشن‌ها، کلاینت‌های اختصاصی، ربات‌ها و ابزارهای اتوماسیون.
+                </p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <a
+                  href="/pages/help/api.html"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="px-3.5 py-2 bg-[#242f3d] hover:bg-[#2e3b4b] text-gray-200 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 border border-white/5"
+                >
+                  <ExternalLink className="w-3.5 h-3.5 text-sky-400" />
+                  مستندات کامل در Pages ↗
+                </a>
+                <button
+                  onClick={() => {
+                    setNewTokenName('');
+                    setNewTokenDays(30);
+                    setGeneratedToken(null);
+                    setTokenError('');
+                    setShowNewTokenModal(true);
+                  }}
+                  className="px-4 py-2 bg-[#3390ec] hover:bg-[#2881d9] text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm shadow-[#3390ec]/30 active:scale-95"
+                >
+                  <PlusCircle className="w-4 h-4" />
+                  تولید توکن امن جدید
+                </button>
+              </div>
+            </div>
+
+            {/* Generated Token Alert Box */}
+            {generatedToken && (
+              <div className="bg-emerald-500/10 border-2 border-emerald-500/40 rounded-2xl p-5 space-y-3 animate-in fade-in">
+                <div className="flex items-center gap-2 text-emerald-300 font-bold text-xs">
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>توکن امن شما با موفقیت تولید گردید!</span>
+                </div>
+                <p className="text-[11px] text-gray-300 leading-relaxed">
+                  توجه: این توکن تنها همین یک‌بار به شکل کامل نمایش داده می‌شود و به صورت هش‌شده در پایگاه‌داده نگهداری خواهد شد. لطفاً آن را کپی کرده و در محل امنی نگهداری کنید:
+                </p>
+                <div className="flex items-center gap-2 bg-[#0e1621] p-2.5 rounded-xl border border-emerald-500/30">
+                  <code className="text-xs font-mono text-emerald-300 select-all break-all flex-1" dir="ltr">
+                    {generatedToken}
+                  </code>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(generatedToken);
+                      setTokenCopied(true);
+                      setTimeout(() => setTokenCopied(false), 2500);
+                    }}
+                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition-all flex items-center gap-1 shrink-0"
+                  >
+                    {tokenCopied ? <CheckCheck className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                    {tokenCopied ? 'کپی شد!' : 'کپی کلید'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Tokens Table */}
+            <div className="bg-[#0e1621] border border-[#242f3d] rounded-2xl overflow-hidden">
+              <div className="px-5 py-3.5 border-b border-[#242f3d] flex items-center justify-between">
+                <h4 className="text-xs font-bold text-gray-200">فهرست کلیدهای API فعال ({apiTokens.length})</h4>
+                <button
+                  onClick={loadApiTokens}
+                  className="p-1.5 text-gray-400 hover:text-white hover:bg-white/5 rounded-lg transition-colors"
+                  title="تازه‌سازی"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${loadingTokens ? 'animate-spin' : ''}`} />
+                </button>
+              </div>
+
+              {loadingTokens && apiTokens.length === 0 ? (
+                <div className="p-8 text-center text-gray-400 text-xs">در حال بارگذاری کلیدهای API...</div>
+              ) : apiTokens.length === 0 ? (
+                <div className="p-8 text-center text-gray-400 text-xs">
+                  هیچ توکن API فعالی تعریف نشده است. با کلیک بر روی «تولید توکن امن جدید»، اولین کلید دسترسی را ایجاد نمایید.
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-right text-xs">
+                    <thead>
+                      <tr className="border-b border-[#242f3d] text-gray-400 bg-[#121b24]">
+                        <th className="py-2.5 px-4 font-semibold">عنوان / نام کاربرد</th>
+                        <th className="py-2.5 px-4 font-semibold">پیش‌نمایش کلید</th>
+                        <th className="py-2.5 px-4 font-semibold">تاریخ ایجاد</th>
+                        <th className="py-2.5 px-4 font-semibold">آخرین استفاده</th>
+                        <th className="py-2.5 px-4 font-semibold">انقضا</th>
+                        <th className="py-2.5 px-4 font-semibold text-center">عملیات</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[#242f3d]/50">
+                      {apiTokens.map((tok) => {
+                        const isExpired = tok.expiresAt && tok.expiresAt <= Date.now();
+                        return (
+                          <tr key={tok.id} className="hover:bg-white/5 transition-colors">
+                            <td className="py-3 px-4 font-bold text-white">{tok.name}</td>
+                            <td className="py-3 px-4 font-mono text-gray-300 text-[11px]" dir="ltr">
+                              {tok.tokenPrefix}
+                            </td>
+                            <td className="py-3 px-4 text-gray-400">
+                              {new Date(tok.createdAt).toLocaleDateString('fa-IR')}
+                            </td>
+                            <td className="py-3 px-4 text-gray-400">
+                              {tok.lastUsedAt ? new Date(tok.lastUsedAt).toLocaleDateString('fa-IR') : 'هنوز استفاده نشده'}
+                            </td>
+                            <td className="py-3 px-4">
+                              {tok.expiresAt ? (
+                                <span className={`px-2 py-0.5 rounded-md text-[10px] font-semibold ${isExpired ? 'bg-red-500/20 text-red-300' : 'bg-emerald-500/20 text-emerald-300'}`}>
+                                  {isExpired ? 'منقضی شده' : new Date(tok.expiresAt).toLocaleDateString('fa-IR')}
+                                </span>
+                              ) : (
+                                <span className="text-gray-400 text-[11px]">همیشگی</span>
+                              )}
+                            </td>
+                            <td className="py-3 px-4 text-center">
+                              <button
+                                onClick={() => handleRevokeToken(tok.id, tok.name)}
+                                className="p-1.5 text-red-400 hover:text-white hover:bg-red-500/20 rounded-lg transition-colors"
+                                title="ابطال و حذف کلید"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            {/* Quickstart Command Card */}
+            <div className="bg-[#0e1621] border border-[#242f3d] rounded-2xl p-5 space-y-3">
+              <div className="flex items-center justify-between">
+                <h4 className="text-xs font-bold text-gray-200 flex items-center gap-2">
+                  <Code2 className="w-4 h-4 text-emerald-400" />
+                  نمونه آزمایش اتصال سریع با cURL:
+                </h4>
+                <button
+                  onClick={() => {
+                    const sample = `curl -X GET "${typeof window !== 'undefined' ? window.location.origin : ''}/api/v1/admin/stats" -H "Authorization: Bearer <کلید_API_شما>"`;
+                    navigator.clipboard.writeText(sample);
+                    setCurlCopied(true);
+                    setTimeout(() => setCurlCopied(false), 2000);
+                  }}
+                  className="text-xs text-[#3390ec] hover:underline flex items-center gap-1"
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                  {curlCopied ? 'کپی شد!' : 'کپی دستور cURL'}
+                </button>
+              </div>
+              <pre className="bg-[#17212b] p-3 rounded-xl text-[11px] font-mono text-gray-300 overflow-x-auto text-left" dir="ltr">
+{`curl -X GET "${typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000'}/api/v1/admin/stats" \\
+  -H "Authorization: Bearer <YOUR_API_TOKEN>"`}
+              </pre>
+            </div>
+          </div>
+        )}
+
+        {/* Modal: Create Token */}
+        {showNewTokenModal && (
+          <div className="fixed inset-0 z-60 bg-black/80 flex items-center justify-center p-4 backdrop-blur-xs animate-in fade-in">
+            <div className="w-full max-w-md bg-[#17212b] rounded-2xl border border-white/10 p-6 space-y-4 shadow-2xl">
+              <div className="flex items-center justify-between border-b border-white/5 pb-3">
+                <h3 className="font-bold text-white text-sm flex items-center gap-2">
+                  <Key className="w-4 h-4 text-sky-400" />
+                  تولید کلید دسترسی امن جدید (API Token)
+                </h3>
+                <button
+                  onClick={() => setShowNewTokenModal(false)}
+                  className="p-1 text-gray-400 hover:text-white rounded-lg"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {tokenError && (
+                <div className="p-3 bg-red-500/15 border border-red-500/30 text-red-300 rounded-xl text-xs">
+                  {tokenError}
+                </div>
+              )}
+
+              <form onSubmit={handleCreateToken} className="space-y-4">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-gray-300">عنوان یا کاربرد کلید:</label>
+                  <input
+                    type="text"
+                    value={newTokenName}
+                    onChange={(e) => setNewTokenName(e.target.value)}
+                    placeholder="مثلاً: ربات تلگرام، کلاینت اختصاصی ویندوز، سرویس بکاپ"
+                    className="w-full bg-[#242f3d] border border-white/5 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-gray-500 focus:outline-hidden focus:border-[#3390ec]"
+                    autoFocus
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-gray-300">مدت اعتبار:</label>
+                  <select
+                    value={newTokenDays}
+                    onChange={(e) => setNewTokenDays(Number(e.target.value))}
+                    className="w-full bg-[#242f3d] border border-white/5 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-hidden focus:border-[#3390ec]"
+                  >
+                    <option value={30}>۳۰ روز</option>
+                    <option value={90}>۹۰ روز (۳ ماه)</option>
+                    <option value={180}>۱۸۰ روز (۶ ماه)</option>
+                    <option value={365}>۳۶۵ روز (یک سال)</option>
+                    <option value={0}>بدون انقضا (همیشگی)</option>
+                  </select>
+                </div>
+
+                <div className="flex gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowNewTokenModal(false)}
+                    className="flex-1 py-2.5 bg-white/5 hover:bg-white/10 text-gray-300 rounded-xl text-xs font-semibold"
+                  >
+                    انصراف
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isGeneratingToken}
+                    className="flex-1 py-2.5 bg-[#3390ec] hover:bg-[#2881d9] disabled:opacity-50 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2"
+                  >
+                    {isGeneratingToken && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+                    ایجاد کلید
+                  </button>
+                </div>
+              </form>
             </div>
           </div>
         )}

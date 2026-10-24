@@ -1,16 +1,17 @@
 import React, { useState } from 'react';
 import { Send, User as UserIcon, Lock, ArrowLeft, Loader2 } from 'lucide-react';
 import { authApi } from '../services/auth';
-import { User, DEFAULT_AVATAR } from '../types';
+import { User, DEFAULT_AVATAR, SystemConfig } from '../types';
 
 import { generateLocalAvatarSvg } from '../services/avatarGenerator';
 import { StarChatLogo } from './StarChatLogo';
 
 interface LoginProps {
   onLogin: (userData: User) => void | Promise<void>;
+  systemConfig?: SystemConfig;
 }
 
-const Login: React.FC<LoginProps> = ({ onLogin }) => {
+const Login: React.FC<LoginProps> = ({ onLogin, systemConfig }) => {
   const [step, setStep] = useState<'username' | 'password' | 'register'>('username');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -81,11 +82,12 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
             <StarChatLogo 
               variant="full" 
               height={180} 
+              src={systemConfig?.customLogoUrl}
               className="relative max-w-full transform hover:scale-105 transition-transform drop-shadow-xl" 
             />
           </div>
-          <h1 className="text-2xl font-black tracking-tight mb-1 text-white">استارلی چت</h1>
-          <p className="text-[#708499] text-xs">پیام‌رسان ابری، امن و پرسرعت</p>
+          <h1 className="text-2xl font-black tracking-tight mb-1 text-white">{systemConfig?.appName || 'استارلی چت'}</h1>
+          <p className="text-[#708499] text-xs">{systemConfig?.appSlogan || 'پیام‌رسان ابری، امن و پرسرعت'}</p>
         </div>
 
         <div className="bg-[#17212b] p-8 rounded-3xl border border-white/5 shadow-2xl relative">

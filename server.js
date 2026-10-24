@@ -583,15 +583,51 @@ app.post('/api/auth/login', wrap(async (req, res) => {
   res.json({ success: true, token: await createSession(username), user: publicUser(user) });
 }));
 
-// احراز هویت برای مسیرهای محافظت‌شده
+// ───────────── احراز هویت توکن‌های API و نشست‌های کاربران ─────────────
+async function findApiToken(tokenStr, now) {
+  if (!tokenStr || typeof tokenStr !== 'string' || tokenStr.length < 20) return null;
+  const th = sha256(tokenStr);
+  const rows = await dbAdapter.getCollectionDocs('api_tokens');
+  for (const r of rows) {
+    if (r.deleted) continue;
+    const item = typeof r.data === 'string' ? JSON.parse(r.data) : r.data;
+    if (item && item.tokenHash === th) {
+      if (item.expiresAt && item.expiresAt <= now) return null;
+      return item;
+    }
+  }
+  return null;
+}
+
+// احراز هویت برای مسیرهای محافظت‌شده (پشتیبانی از توکن‌های نشست و توکن‌های امن API)
 async function auth(req, res, next) {
   try {
     const h = req.headers.authorization || '';
-    const token = h.startsWith('Bearer ') ? h.slice(7) : '';
-    if (!token) return res.status(401).json({ success: false, message: 'نیاز به ورود' });
-    const user = await dbAdapter.getSessionUser(sha256(token), Date.now());
-    if (!user) return res.status(401).json({ success: false, message: 'نشست منقضی شده است' });
-    if (user.isBanned && !(user.bannedUntil && user.bannedUntil < Date.now())) {
+    const token = h.startsWith('Bearer ') ? h.slice(7).trim() : '';
+    if (!token) return res.status(401).json({ success: false, message: 'نیاز به توکن دسترسی (Bearer Token)' });
+
+    const now = Date.now();
+    // ۱. بررسی تطابق با توکن‌های امن API
+    const apiToken = await findApiToken(token, now);
+    if (apiToken) {
+      req.isApiToken = true;
+      req.apiToken = apiToken;
+      req.user = {
+        id: apiToken.createdBy || 'admin',
+        username: apiToken.createdBy || 'admin',
+        displayName: `مدیریت API (${apiToken.name})`,
+        role: 'superadmin'
+      };
+      // به‌روزرسانی زمان آخرین استفاده
+      apiToken.lastUsedAt = now;
+      dbAdapter.putDoc('api_tokens', apiToken.id, apiToken, now).catch(() => {});
+      return next();
+    }
+
+    // ۲. بررسی نشست معمول کاربری
+    const user = await dbAdapter.getSessionUser(sha256(token), now);
+    if (!user) return res.status(401).json({ success: false, message: 'نشست منقضی شده یا توکن نامعتبر است' });
+    if (user.isBanned && !(user.bannedUntil && user.bannedUntil < now)) {
       return res.status(403).json({ success: false, message: 'حساب شما مسدود شده است.' });
     }
     req.user = user;
@@ -836,6 +872,489 @@ app.post('/api/admin/panic', auth, wrap(async (req, res) => {
     message: 'تمامی اطلاعات و پایگاه‌داده با موفقیت نابود و پاکسازی گردیدند.'
   });
 }));
+
+// ═══════════════════════════════════════════════════════════════════════
+// ───────────── RESTful Management & Client API v1 ─────────────
+// ═══════════════════════════════════════════════════════════════════════
+
+// ۱. مدیریت توکن‌های امن API (مخصوص ادمین یا دارندگان کلید اصلی)
+app.get('/api/v1/admin/tokens', auth, wrap(async (req, res) => {
+  if (!isAdmin(req.user)) return res.status(403).json({ success: false, message: 'فقط مدیر به این بخش دسترسی دارد.' });
+  const rows = await dbAdapter.getCollectionDocs('api_tokens');
+  const tokens = rows
+    .filter(r => !r.deleted)
+    .map(r => typeof r.data === 'string' ? JSON.parse(r.data) : r.data)
+    .map(({ tokenHash, ...safe }) => safe)
+    .sort((a, b) => b.createdAt - a.createdAt);
+
+  res.json({ success: true, count: tokens.length, tokens });
+}));
+
+app.post('/api/v1/admin/tokens', auth, wrap(async (req, res) => {
+  if (!isAdmin(req.user)) return res.status(403).json({ success: false, message: 'فقط مدیر به این بخش دسترسی دارد.' });
+  const name = String(req.body?.name || '').trim();
+  if (!name) return res.status(400).json({ success: false, message: 'نام یا برچسب توکن الزامی است.' });
+  const expiresInDays = parseInt(req.body?.expiresInDays || '0', 10);
+
+  // تولید کلید ۶۴ کاراکتری هگز تصادفی امن
+  const rawSecret = crypto.randomBytes(32).toString('hex');
+  const fullToken = `stg_live_${rawSecret}`;
+  const now = Date.now();
+  const id = `tok_${now}_${crypto.randomBytes(4).toString('hex')}`;
+  const expiresAt = expiresInDays > 0 ? now + expiresInDays * 24 * 3600 * 1000 : 0;
+
+  const tokenDoc = {
+    id,
+    name,
+    tokenPrefix: fullToken.slice(0, 14) + '...' + fullToken.slice(-6),
+    tokenHash: sha256(fullToken),
+    createdAt: now,
+    expiresAt,
+    lastUsedAt: 0,
+    createdBy: req.user.username || 'admin',
+    createdByName: req.user.displayName || 'مدیر سیستم'
+  };
+
+  await dbAdapter.putDoc('api_tokens', id, tokenDoc, now);
+
+  res.status(201).json({
+    success: true,
+    message: 'توکن امن با موفقیت ایجاد شد. این توکن تنها یک بار به شما نمایش داده می‌شود؛ لطفاً آن را در مکانی امن نگهداری کنید.',
+    token: fullToken,
+    tokenInfo: {
+      id: tokenDoc.id,
+      name: tokenDoc.name,
+      tokenPrefix: tokenDoc.tokenPrefix,
+      createdAt: tokenDoc.createdAt,
+      expiresAt: tokenDoc.expiresAt
+    }
+  });
+}));
+
+app.delete('/api/v1/admin/tokens/:id', auth, wrap(async (req, res) => {
+  if (!isAdmin(req.user)) return res.status(403).json({ success: false, message: 'فقط مدیر به این بخش دسترسی دارد.' });
+  const id = req.params.id;
+  const existing = await dbAdapter.getDoc('api_tokens', id);
+  if (!existing) return res.status(404).json({ success: false, message: 'توکن مورد نظر یافت نشد.' });
+  await dbAdapter.deleteDoc('api_tokens', id, Date.now());
+  res.json({ success: true, message: 'توکن با موفقیت باطل و حذف گردید.' });
+}));
+
+// ۲. آمار و پایش زنده سیستم
+app.get('/api/v1/admin/stats', auth, wrap(async (req, res) => {
+  if (!isAdmin(req.user)) return res.status(403).json({ success: false, message: 'دسترسی غیرمجاز' });
+  const [usersRows, chatsRows] = await Promise.all([
+    dbAdapter.getCollectionDocs('users'),
+    dbAdapter.getCollectionDocs('chats')
+  ]);
+
+  const users = usersRows.filter(r => !r.deleted).map(r => typeof r.data === 'string' ? JSON.parse(r.data) : r.data);
+  const chats = chatsRows.filter(r => !r.deleted).map(r => typeof r.data === 'string' ? JSON.parse(r.data) : r.data);
+
+  let totalMessages = 0;
+  let channelsCount = 0;
+  let groupsCount = 0;
+  let privateChatsCount = 0;
+
+  for (const c of chats) {
+    if (Array.isArray(c.messages)) totalMessages += c.messages.length;
+    if (c.type === 'channel') channelsCount++;
+    else if (c.type === 'group') groupsCount++;
+    else if (c.type === 'private') privateChatsCount++;
+  }
+
+  const now = Date.now();
+  const active24h = users.filter(u => u.lastSeen && (now - u.lastSeen <= 24 * 3600 * 1000)).length;
+
+  res.json({
+    success: true,
+    stats: {
+      totalUsers: users.length,
+      activeUsers24h: active24h,
+      totalChats: chats.length,
+      totalMessages,
+      channelsCount,
+      groupsCount,
+      privateChatsCount,
+      databaseType: dbAdapter.type,
+      uptimeSeconds: Math.round(process.uptime()),
+      memoryUsage: process.memoryUsage(),
+      timestamp: now
+    }
+  });
+}));
+
+// ۳. دریافت و به‌روزرسانی تنظیمات و هویت بصری
+app.get('/api/v1/admin/config', auth, wrap(async (req, res) => {
+  const cfg = await dbAdapter.getDoc('system_config', 'main') || {};
+  res.json({ success: true, config: cfg });
+}));
+
+app.patch('/api/v1/admin/config', auth, wrap(async (req, res) => {
+  if (!isAdmin(req.user)) return res.status(403).json({ success: false, message: 'فقط مدیر سیستم مجاز به تغییر تنظیمات است.' });
+  const cur = await dbAdapter.getDoc('system_config', 'main') || { id: 'main' };
+  const allowed = [
+    'appName', 'appSlogan', 'welcomeMessage', 'loginBannerUrl', 'customLogoUrl', 'customSymbolUrl', 'accentColor',
+    'allowRegistration', 'allowGroupCreation', 'allowChannelCreation', 'allowPublicChannels', 'allowStories',
+    'geminiEnabled', 'geminiApiKey', 'geminiProxyUrl', 'geminiModel'
+  ];
+
+  for (const k of allowed) {
+    if (req.body[k] !== undefined) cur[k] = req.body[k];
+  }
+
+  const now = Date.now();
+  await dbAdapter.putDoc('system_config', 'main', cur, now);
+  res.json({ success: true, message: 'تنظیمات و برند پیام‌رسان با موفقیت به‌روزرسانی شد.', config: cur });
+}));
+
+// ۴. ارسال پیام سراسری (Broadcast)
+app.post('/api/v1/admin/broadcast', auth, wrap(async (req, res) => {
+  if (!isAdmin(req.user)) return res.status(403).json({ success: false, message: 'فقط مدیر سیستم مجاز به ارسال اطلاعیه سراسری است.' });
+  const { title, message, target = 'all', pin = true } = req.body || {};
+  if (!message || typeof message !== 'string') return res.status(400).json({ success: false, message: 'متن پیام اطلاعیه الزامی است.' });
+
+  const chatsRows = await dbAdapter.getCollectionDocs('chats');
+  const now = Date.now();
+  let affected = 0;
+
+  const broadcastMsg = {
+    id: `msg_bc_${now}_${crypto.randomBytes(3).toString('hex')}`,
+    senderId: req.user.id || 'admin',
+    text: title ? `📢 **${title}**\n\n${message}` : `📢 ${message}`,
+    timestamp: now,
+    isRead: false
+  };
+
+  for (const r of chatsRows) {
+    if (r.deleted) continue;
+    const chat = typeof r.data === 'string' ? JSON.parse(r.data) : r.data;
+    if (!chat) continue;
+    if (target === 'channels' && chat.type !== 'channel') continue;
+    if (target === 'groups' && chat.type !== 'group') continue;
+
+    chat.messages = Array.isArray(chat.messages) ? chat.messages : [];
+    chat.messages.push(broadcastMsg);
+    chat.lastMessage = broadcastMsg;
+    if (pin) {
+      chat.pinnedMessageIds = Array.isArray(chat.pinnedMessageIds) ? chat.pinnedMessageIds : [];
+      if (!chat.pinnedMessageIds.includes(broadcastMsg.id)) chat.pinnedMessageIds.push(broadcastMsg.id);
+    }
+    await dbAdapter.putDoc('chats', chat.id, chat, now);
+    affected++;
+  }
+
+  res.json({ success: true, message: `اطلاعیه سراسری با موفقیت به ${affected} گفتگو ارسال گردید.`, affectedChats: affected });
+}));
+
+// ۵. مدیریت کاربران (CRUD)
+app.get('/api/v1/users', auth, wrap(async (req, res) => {
+  const rows = await dbAdapter.getCollectionDocs('users');
+  const q = String(req.query.search || '').trim().toLowerCase();
+  const roleFilter = String(req.query.role || '').trim();
+  const limit = Math.min(parseInt(req.query.limit || '50', 10), 200);
+  const offset = Math.max(parseInt(req.query.offset || '0', 10), 0);
+
+  let users = rows
+    .filter(r => !r.deleted)
+    .map(r => typeof r.data === 'string' ? JSON.parse(r.data) : r.data)
+    .map(publicUser);
+
+  if (q) {
+    users = users.filter(u => 
+      (u.username && u.username.toLowerCase().includes(q)) || 
+      (u.displayName && u.displayName.toLowerCase().includes(q))
+    );
+  }
+  if (roleFilter) {
+    users = users.filter(u => u.role === roleFilter);
+  }
+
+  const total = users.length;
+  const paged = users.slice(offset, offset + limit);
+  res.json({ success: true, total, count: paged.length, offset, limit, users: paged });
+}));
+
+app.get('/api/v1/users/:id', auth, wrap(async (req, res) => {
+  const user = await dbAdapter.getDoc('users', normUser(req.params.id));
+  if (!user) return res.status(404).json({ success: false, message: 'کاربر یافت نشد.' });
+  res.json({ success: true, user: publicUser(user) });
+}));
+
+app.post('/api/v1/users', auth, wrap(async (req, res) => {
+  if (!isAdmin(req.user)) return res.status(403).json({ success: false, message: 'فقط مدیر می‌تواند کاربر مستقیم ایجاد کند.' });
+  const username = normUser(req.body?.username);
+  const password = String(req.body?.password || '');
+  const displayName = String(req.body?.displayName || username).trim();
+  const role = ['user', 'admin', 'superadmin'].includes(req.body?.role) ? req.body.role : 'user';
+
+  if (!validUsername(username)) return res.status(400).json({ success: false, message: 'نام کاربری نامعتبر است (۳ تا ۳۲ کاراکتر).' });
+  if (password.length < 6) return res.status(400).json({ success: false, message: 'رمز عبور باید حداقل ۶ کاراکتر باشد.' });
+  if (await dbAdapter.getDoc('users', username)) return res.status(409).json({ success: false, message: 'کاربری با این نام کاربری موجود است.' });
+
+  const now = Date.now();
+  const user = {
+    id: username, username, displayName, passwordHash: hashPassword(password),
+    avatar: req.body?.avatar, bio: req.body?.bio || '', phone: req.body?.phone || '',
+    role, status: 'offline', lastSeen: now, theme: 'night', wallpaper: 'default',
+    contacts: [], privacy: { showStatus: 'all', showAvatar: 'all' }
+  };
+
+  await dbAdapter.putDoc('users', username, user, now);
+  res.status(201).json({ success: true, message: 'کاربر با موفقیت ایجاد شد.', user: publicUser(user) });
+}));
+
+app.patch('/api/v1/users/:id', auth, wrap(async (req, res) => {
+  const targetId = normUser(req.params.id);
+  const admin = isAdmin(req.user);
+  if (!admin && targetId !== req.user.id) return res.status(403).json({ success: false, message: 'اجازه ویرایش این حساب را ندارید.' });
+
+  const user = await dbAdapter.getDoc('users', targetId);
+  if (!user) return res.status(404).json({ success: false, message: 'کاربر یافت نشد.' });
+
+  const body = req.body || {};
+  if (body.displayName) user.displayName = String(body.displayName).trim().slice(0, 60);
+  if (body.bio !== undefined) user.bio = String(body.bio).slice(0, 300);
+  if (body.phone !== undefined) user.phone = String(body.phone).slice(0, 30);
+  if (body.avatar !== undefined) user.avatar = body.avatar;
+  if (body.wallpaper !== undefined) user.wallpaper = body.wallpaper;
+  if (body.theme && ['day', 'night', 'oled', 'arctic'].includes(body.theme)) user.theme = body.theme;
+
+  if (admin) {
+    if (body.role && ['user', 'admin', 'superadmin'].includes(body.role)) user.role = body.role;
+    if (body.isBanned !== undefined) user.isBanned = Boolean(body.isBanned);
+    if (body.banReason !== undefined) user.banReason = String(body.banReason);
+    if (body.bannedUntil !== undefined) user.bannedUntil = Number(body.bannedUntil) || undefined;
+    if (body.password && typeof body.password === 'string' && body.password.length >= 6) {
+      user.passwordHash = hashPassword(body.password);
+    }
+  }
+
+  const now = Date.now();
+  await dbAdapter.putDoc('users', targetId, user, now);
+  res.json({ success: true, message: 'اطلاعات کاربر به‌روزرسانی شد.', user: publicUser(user) });
+}));
+
+app.delete('/api/v1/users/:id', auth, wrap(async (req, res) => {
+  if (!isAdmin(req.user)) return res.status(403).json({ success: false, message: 'فقط مدیر سیستم مجاز به حذف کاربر است.' });
+  const targetId = normUser(req.params.id);
+  if (targetId === req.user.id) return res.status(400).json({ success: false, message: 'نمی‌توانید حساب جاری خود را حذف کنید.' });
+  await dbAdapter.deleteDoc('users', targetId, Date.now());
+  res.json({ success: true, message: 'حساب کاربری حذف گردید.' });
+}));
+
+// ۶. مدیریت گفتگوها، گروه‌ها و کانال‌ها
+app.get('/api/v1/chats', auth, wrap(async (req, res) => {
+  const rows = await dbAdapter.getCollectionDocs('chats');
+  const admin = isAdmin(req.user);
+  const typeFilter = req.query.type;
+  const limit = Math.min(parseInt(req.query.limit || '100', 10), 300);
+
+  let chats = rows
+    .filter(r => !r.deleted)
+    .map(r => typeof r.data === 'string' ? JSON.parse(r.data) : r.data);
+
+  if (!admin) {
+    chats = chats.filter(c => Array.isArray(c.participantIds) && c.participantIds.includes(req.user.id));
+  }
+  if (typeFilter) {
+    chats = chats.filter(c => c.type === typeFilter);
+  }
+
+  res.json({ success: true, count: chats.length, chats: chats.slice(0, limit) });
+}));
+
+app.post('/api/v1/chats', auth, wrap(async (req, res) => {
+  const { type = 'private', groupName, description, participants = [], publicHandle, groupAvatar } = req.body || {};
+  if (!['private', 'group', 'channel'].includes(type)) return res.status(400).json({ success: false, message: 'نوع گفتگو نامعتبر است.' });
+
+  const now = Date.now();
+  const id = `${type === 'channel' ? 'ch' : (type === 'group' ? 'g' : 'chat')}_${now}_${crypto.randomBytes(3).toString('hex')}`;
+  
+  const allParticipantIds = Array.from(new Set([req.user.id, ...(Array.isArray(participants) ? participants : [])]));
+  const fullParticipants = [];
+  for (const pid of allParticipantIds) {
+    const u = await dbAdapter.getDoc('users', pid);
+    if (u) fullParticipants.push(publicUser(u));
+  }
+
+  const newChat = {
+    id,
+    type,
+    groupName: groupName || (type === 'private' ? 'گفتگوی خصوصی' : 'گروه جدید'),
+    description: description || '',
+    groupAvatar: groupAvatar || '',
+    publicHandle: publicHandle ? String(publicHandle).replace('@', '') : undefined,
+    adminId: req.user.id,
+    participantIds: allParticipantIds,
+    participants: fullParticipants,
+    messages: [],
+    pinnedMessageIds: [],
+    unreadCount: 0,
+    createdAt: now
+  };
+
+  await dbAdapter.putDoc('chats', id, newChat, now);
+  res.status(201).json({ success: true, message: 'گفتگو یا کانال با موفقیت ساخته شد.', chat: newChat });
+}));
+
+app.get('/api/v1/chats/:id', auth, wrap(async (req, res) => {
+  const chat = await dbAdapter.getDoc('chats', req.params.id);
+  if (!chat) return res.status(404).json({ success: false, message: 'گفتگو یافت نشد.' });
+  if (!isAdmin(req.user) && !(Array.isArray(chat.participantIds) && chat.participantIds.includes(req.user.id))) {
+    return res.status(403).json({ success: false, message: 'اجازه مشاهده این گفتگو را ندارید.' });
+  }
+  res.json({ success: true, chat });
+}));
+
+app.delete('/api/v1/chats/:id', auth, wrap(async (req, res) => {
+  const chat = await dbAdapter.getDoc('chats', req.params.id);
+  if (!chat) return res.status(404).json({ success: false, message: 'گفتگو یافت نشد.' });
+  if (!isAdmin(req.user) && chat.adminId !== req.user.id) {
+    return res.status(403).json({ success: false, message: 'فقط سازنده یا مدیر می‌تواند گفتگو را حذف کند.' });
+  }
+  await dbAdapter.deleteDoc('chats', req.params.id, Date.now());
+  res.json({ success: true, message: 'گفتگو حذف گردید.' });
+}));
+
+// ۷. ارسال، دریافت و مدیریت پیام‌ها
+app.get('/api/v1/chats/:id/messages', auth, wrap(async (req, res) => {
+  const chat = await dbAdapter.getDoc('chats', req.params.id);
+  if (!chat) return res.status(404).json({ success: false, message: 'گفتگو یافت نشد.' });
+  if (!isAdmin(req.user) && !(Array.isArray(chat.participantIds) && chat.participantIds.includes(req.user.id))) {
+    return res.status(403).json({ success: false, message: 'اجازه مشاهده پیام‌ها را ندارید.' });
+  }
+
+  let msgs = Array.isArray(chat.messages) ? chat.messages : [];
+  const before = parseInt(req.query.before, 10);
+  const after = parseInt(req.query.after, 10);
+  const limit = Math.min(parseInt(req.query.limit || '50', 10), 200);
+
+  if (before) msgs = msgs.filter(m => m.timestamp < before);
+  if (after) msgs = msgs.filter(m => m.timestamp > after);
+
+  const sliced = msgs.slice(-limit);
+  res.json({ success: true, total: msgs.length, count: sliced.length, messages: sliced });
+}));
+
+app.post('/api/v1/chats/:id/messages', auth, wrap(async (req, res) => {
+  const chat = await dbAdapter.getDoc('chats', req.params.id);
+  if (!chat) return res.status(404).json({ success: false, message: 'گفتگو یافت نشد.' });
+  if (!isAdmin(req.user) && !(Array.isArray(chat.participantIds) && chat.participantIds.includes(req.user.id))) {
+    return res.status(403).json({ success: false, message: 'اجازه ارسال پیام در این گفتگو را ندارید.' });
+  }
+
+  const { text = '', imageUrl, audioUrl, poll, replyToId } = req.body || {};
+  if (!text && !imageUrl && !audioUrl && !poll) {
+    return res.status(400).json({ success: false, message: 'محتوای پیام (متن، تصویر، صدا یا نظرسنجی) الزامی است.' });
+  }
+
+  const now = Date.now();
+  const newMsg = {
+    id: `m_${now}_${crypto.randomBytes(3).toString('hex')}`,
+    senderId: req.user.id,
+    text: String(text || ''),
+    imageUrl: imageUrl || undefined,
+    audioUrl: audioUrl || undefined,
+    poll: poll || undefined,
+    replyToId: replyToId || undefined,
+    timestamp: now,
+    isRead: false
+  };
+
+  chat.messages = Array.isArray(chat.messages) ? chat.messages : [];
+  chat.messages.push(newMsg);
+  chat.lastMessage = newMsg;
+  chat.unreadCount = (chat.unreadCount || 0) + 1;
+
+  await dbAdapter.putDoc('chats', req.params.id, chat, now);
+  res.status(201).json({ success: true, message: 'پیام با موفقیت ارسال شد.', messageData: newMsg });
+}));
+
+app.delete('/api/v1/chats/:id/messages/:msgId', auth, wrap(async (req, res) => {
+  const chat = await dbAdapter.getDoc('chats', req.params.id);
+  if (!chat) return res.status(404).json({ success: false, message: 'گفتگو یافت نشد.' });
+
+  const msgId = req.params.msgId;
+  chat.messages = Array.isArray(chat.messages) ? chat.messages : [];
+  const idx = chat.messages.findIndex(m => m.id === msgId);
+  if (idx === -1) return res.status(404).json({ success: false, message: 'پیام یافت نشد.' });
+
+  const msg = chat.messages[idx];
+  if (!isAdmin(req.user) && msg.senderId !== req.user.id && chat.adminId !== req.user.id) {
+    return res.status(403).json({ success: false, message: 'اجازه حذف این پیام را ندارید.' });
+  }
+
+  chat.messages.splice(idx, 1);
+  if (chat.lastMessage?.id === msgId) {
+    chat.lastMessage = chat.messages[chat.messages.length - 1] || undefined;
+  }
+
+  await dbAdapter.putDoc('chats', req.params.id, chat, Date.now());
+  res.json({ success: true, message: 'پیام حذف شد.' });
+}));
+
+app.post('/api/v1/chats/:id/messages/:msgId/reactions', auth, wrap(async (req, res) => {
+  const chat = await dbAdapter.getDoc('chats', req.params.id);
+  if (!chat) return res.status(404).json({ success: false, message: 'گفتگو یافت نشد.' });
+
+  const msgId = req.params.msgId;
+  const emoji = String(req.body?.emoji || '').trim();
+  if (!emoji) return res.status(400).json({ success: false, message: 'ایموجی واکنش الزامی است.' });
+
+  const msg = (chat.messages || []).find(m => m.id === msgId);
+  if (!msg) return res.status(404).json({ success: false, message: 'پیام یافت نشد.' });
+
+  msg.reactions = Array.isArray(msg.reactions) ? msg.reactions : [];
+  const cur = msg.reactions.find(r => r.emoji === emoji);
+  if (cur) {
+    if (!cur.users.includes(req.user.id)) {
+      cur.users.push(req.user.id);
+      cur.count = cur.users.length;
+    }
+  } else {
+    msg.reactions.push({ emoji, count: 1, users: [req.user.id] });
+  }
+
+  await dbAdapter.putDoc('chats', req.params.id, chat, Date.now());
+  res.json({ success: true, reactions: msg.reactions });
+}));
+
+// ۸. احراز هویت اختصاصی API v1 برای برنامه‌های جانبی
+app.post('/api/v1/auth/login', wrap(async (req, res) => {
+  const username = normUser(req.body?.username);
+  const password = String(req.body?.password || '');
+  if (!username || !password) return res.status(400).json({ success: false, message: 'نام کاربری و رمز عبور الزامی است.' });
+  const user = await dbAdapter.getDoc('users', username);
+  if (!user || !verifyPassword(password, user.passwordHash)) {
+    return res.status(401).json({ success: false, message: 'نام کاربری یا رمز عبور نامعتبر است.' });
+  }
+  const token = await createSession(username);
+  res.json({ success: true, token, user: publicUser(user) });
+}));
+
+app.post('/api/v1/auth/register', wrap(async (req, res) => {
+  const username = normUser(req.body?.username);
+  const password = String(req.body?.password || '');
+  const displayName = String(req.body?.displayName || username).trim();
+  if (!validUsername(username)) return res.status(400).json({ success: false, message: 'نام کاربری نامعتبر است.' });
+  if (password.length < 6) return res.status(400).json({ success: false, message: 'رمز عبور باید حداقل ۶ کاراکتر باشد.' });
+  if (await dbAdapter.getDoc('users', username)) return res.status(409).json({ success: false, message: 'نام کاربری از قبل موجود است.' });
+
+  const now = Date.now();
+  const user = {
+    id: username, username, displayName, passwordHash: hashPassword(password),
+    avatar: req.body?.avatar, status: 'online', lastSeen: now, role: 'user',
+    contacts: [], privacy: { showStatus: 'all', showAvatar: 'all' }, theme: 'night', wallpaper: 'default'
+  };
+  await dbAdapter.putDoc('users', username, user, now);
+  const token = await createSession(username);
+  res.status(201).json({ success: true, token, user: publicUser(user) });
+}));
+
+app.get('/api/v1/auth/me', auth, (req, res) => {
+  res.json({ success: true, user: publicUser(req.user), isApiToken: !!req.isApiToken });
+});
 
 // فایل‌های استاتیک
 app.use('/assets', express.static(path.join(DIST_DIR, 'assets'), { maxAge: '1y', immutable: true }));

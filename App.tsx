@@ -928,13 +928,20 @@ const App: React.FC = () => {
         <div className="absolute w-[500px] h-[500px] bg-[#3390ec]/15 rounded-full blur-3xl pointer-events-none animate-pulse" />
         <div className="relative mb-3 group cursor-pointer w-full flex items-center justify-center">
           <div className="absolute -inset-6 bg-gradient-to-r from-red-500/20 via-[#3390ec]/25 to-blue-600/20 rounded-full blur-2xl opacity-60 pointer-events-none" />
-          <StarChatLogo variant="full" height={180} className="relative max-w-full drop-shadow-2xl animate-pop" />
+          <StarChatLogo 
+            variant="full" 
+            height={180} 
+            src={systemConfig?.customLogoUrl}
+            className="relative max-w-full drop-shadow-2xl animate-pop" 
+          />
         </div>
-        <p className="text-xs text-[#708499] animate-pulse mt-2">در حال بارگذاری پیام‌رسان...</p>
+        <p className="text-xs text-[#708499] animate-pulse mt-2">
+          {systemConfig?.appName ? `در حال بارگذاری ${systemConfig.appName}...` : 'در حال بارگذاری پیام‌رسان...'}
+        </p>
       </div>
     );
   }
-  if (!currentUser) return <Login onLogin={handleAuth} />;
+  if (!currentUser) return <Login onLogin={handleAuth} systemConfig={systemConfig} />;
 
   // Lock Screen (UI Only - Same as before)
   if (isAppLocked) {
@@ -1153,6 +1160,7 @@ const App: React.FC = () => {
             onUsernameClick={handleUsernameClick}
             onToggleContact={handleToggleContact}
             onReportMessage={(msg) => setReportingMessage(msg)}
+            systemConfig={systemConfig}
           />
         </div>
       </div>
@@ -1422,6 +1430,7 @@ const App: React.FC = () => {
               <StarChatLogo 
                 variant="full" 
                 height={180} 
+                src={systemConfig?.customLogoUrl}
                 className="relative max-w-full transform hover:scale-105 transition-transform drop-shadow-2xl animate-pop" 
               />
             </div>
@@ -1429,11 +1438,11 @@ const App: React.FC = () => {
             {/* Title & Slogan */}
             <div className="space-y-2">
               <h1 className="text-2xl font-black text-white tracking-wide flex items-center justify-center gap-2">
-                <span>استارلی چت</span>
+                <span>{systemConfig?.appName || 'استارلی چت'}</span>
                 <Sparkles size={20} className="text-amber-400" />
               </h1>
               <p className="text-xs text-[#708499] leading-relaxed">
-                پیام‌رسان ابری، امن و پرسرعت با رمزنگاری پیشرفته
+                {systemConfig?.appSlogan || 'پیام‌رسان ابری، امن و پرسرعت با رمزنگاری پیشرفته'}
               </p>
             </div>
 
