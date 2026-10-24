@@ -89,6 +89,11 @@ export function isNotificationGranted(): boolean {
   return isNotificationSupported() && Notification.permission === 'granted';
 }
 
+export function getNotificationPermissionStatus(): NotificationPermission | 'unsupported' {
+  if (!isNotificationSupported()) return 'unsupported';
+  return Notification.permission;
+}
+
 /**
  * Dispatch desktop / mobile web notification
  */

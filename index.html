@@ -55,52 +55,148 @@
 
     /* Themes */
     .day-theme { 
-      --tg-bg: #f0f2f5; 
+      --tg-bg: #8ec09a; 
       --tg-secondary: #ffffff; 
-      --tg-text: #1f2937;
-      --tg-text-secondary: #526273;
-      --tg-input: #f4f4f5;
+      --tg-text: #111827;
+      --tg-text-secondary: #64748b;
+      --tg-input: #f1f5f9;
     }
 
-    .day-theme [class*="bg-[#0e1621]"],
-    .day-theme [class*="bg-[#17212b]"],
-    .day-theme [class*="bg-[#1e2c3a]"],
-    .day-theme [class*="bg-[#242f3d]"],
-    .day-theme [class*="bg-[#2b3949]"],
-    .day-theme [class*="bg-[#2b3a4a]"],
-    .day-theme [class*="bg-[#2e3c4e]"],
-    .day-theme [class*="bg-[#2f3d4e]"],
-    .day-theme [class*="bg-[#1e2a38]"],
-    .day-theme [class*="bg-[#1c2733]"],
-    .day-theme [class*="bg-[#1b2531]"],
-    .day-theme [class*="bg-[#121b24]"],
-    .day-theme [class*="bg-[#182533]"],
-    .day-theme [class*="bg-[#111827]"],
-    .day-theme [class*="bg-[#0b141a]"] {
+    /* Base Surfaces */
+    .day-theme [class*="bg-[#0e1621]"] {
+      background-color: #e4ecf2 !important;
+    }
+    .day-theme [class*="bg-[#17212b]"] {
       background-color: #ffffff !important;
     }
+    .day-theme [class*="bg-[#242f3d]"] {
+      background-color: #f8fafc !important;
+    }
+    .day-theme [class*="bg-[#1e2c3a]"],
+    .day-theme [class*="bg-[#2b3949]"],
+    .day-theme [class*="bg-[#2b3a4a]"],
+    .day-theme [class*="bg-[#1e2a38]"],
+    .day-theme [class*="bg-[#1c2733]"],
+    .day-theme [class*="bg-[#1b2531]"] {
+      background-color: #f1f5f9 !important;
+    }
 
-    .day-theme [class*="bg-white/5"],
+    /* Subdued cards and hover backgrounds */
+    .day-theme [class*="bg-white/5"] {
+      background-color: rgba(15, 23, 42, 0.04) !important;
+    }
     .day-theme [class*="bg-white/10"] {
-      background-color: rgba(15, 23, 42, 0.06) !important;
+      background-color: rgba(15, 23, 42, 0.08) !important;
+    }
+    .day-theme [class*="hover:bg-white/5"]:hover {
+      background-color: rgba(15, 23, 42, 0.05) !important;
+    }
+    .day-theme [class*="hover:bg-white/10"]:hover {
+      background-color: rgba(15, 23, 42, 0.09) !important;
     }
 
+    /* General text contrast */
     .day-theme [class*="text-white"] {
-      color: #1f2937 !important;
+      color: #111827 !important;
+    }
+    .day-theme [class*="text-[#708499]"] {
+      color: #64748b !important;
     }
 
-    .day-theme [class*="bg-[#3390ec]"] [class*="text-white"],
-    .day-theme [class*="bg-[#2b7bc4]"] [class*="text-white"],
-    .day-theme .message-bubble[class*="bg-[#2b5278]"] {
+    /* CRITICAL: Keep crisp white text on colored accent buttons & badges! */
+    .day-theme [class*="bg-[#3390ec]"],
+    .day-theme [class*="bg-[#3390ec]"] *,
+    .day-theme [class*="bg-[#2881d9]"],
+    .day-theme [class*="bg-[#2881d9]"] *,
+    .day-theme [class*="bg-red-500"],
+    .day-theme [class*="bg-red-500"] *,
+    .day-theme [class*="bg-red-600"] *,
+    .day-theme [class*="bg-green-500"] *,
+    .day-theme [class*="bg-emerald-500"] * {
       color: #ffffff !important;
     }
 
-    .day-theme .message-bubble[class*="bg-[#182533]"] {
-      color: #1f2937 !important;
+    /* Telegram Light Message Bubbles */
+    /* 1. Sent messages: Classic Telegram soft green */
+    .day-theme .message-bubble.bubble-sent,
+    .day-theme .message-bubble[class*="bg-[#2b5278]"] {
+      background-color: #eeffde !important;
+      color: #111827 !important;
+      border: 1px solid #d4f0be !important;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05) !important;
+    }
+    .day-theme .message-bubble.bubble-sent *,
+    .day-theme .message-bubble[class*="bg-[#2b5278]"] * {
+      color: #111827 !important;
+    }
+    /* Sent bubble time & checkmark in emerald */
+    .day-theme .message-bubble.bubble-sent .bubble-meta,
+    .day-theme .message-bubble[class*="bg-[#2b5278]"] .bubble-meta,
+    .day-theme .message-bubble.bubble-sent .bubble-meta *,
+    .day-theme .message-bubble[class*="bg-[#2b5278]"] .bubble-meta * {
+      color: #4fae4e !important;
+    }
+    .day-theme .message-tail-sent {
+      color: #eeffde !important;
     }
 
+    /* 2. Received messages: Pure crisp white */
+    .day-theme .message-bubble.bubble-received,
+    .day-theme .message-bubble[class*="bg-[#182533]"] {
+      background-color: #ffffff !important;
+      color: #111827 !important;
+      border: 1px solid #e2e8f0 !important;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06) !important;
+    }
+    .day-theme .message-bubble.bubble-received *,
+    .day-theme .message-bubble[class*="bg-[#182533]"] * {
+      color: #111827 !important;
+    }
+    .day-theme .message-bubble.bubble-received .bubble-meta,
+    .day-theme .message-bubble[class*="bg-[#182533]"] .bubble-meta,
+    .day-theme .message-bubble.bubble-received .bubble-meta * {
+      color: #707579 !important;
+    }
+    .day-theme .message-tail-received {
+      color: #ffffff !important;
+    }
+
+    /* Borders */
+    .day-theme [class*="border-white/5"],
+    .day-theme [class*="border-white/10"],
+    .day-theme [class*="border-white/20"],
     .day-theme [class*="border-white"] {
-      border-color: rgba(15, 23, 42, 0.12) !important;
+      border-color: #e2e8f0 !important;
+    }
+    .day-theme [class*="border-black"] {
+      border-color: #e2e8f0 !important;
+    }
+
+    /* Inputs & Textareas */
+    .day-theme input,
+    .day-theme textarea {
+      background-color: #f1f5f9 !important;
+      color: #111827 !important;
+      border-color: #cbd5e1 !important;
+    }
+    .day-theme input::placeholder,
+    .day-theme textarea::placeholder {
+      color: #94a3b8 !important;
+    }
+
+    /* Modals & Backdrops */
+    .day-theme .fixed.inset-0[class*="bg-black/80"],
+    .day-theme .fixed.inset-0[class*="bg-black/60"],
+    .day-theme .fixed.inset-0[class*="bg-black/50"] {
+      background-color: rgba(15, 23, 42, 0.5) !important;
+    }
+
+    /* Scrollbars in Day Theme */
+    .day-theme .custom-scrollbar::-webkit-scrollbar-thumb {
+      background: rgba(0, 0, 0, 0.18) !important;
+    }
+    .day-theme .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+      background: rgba(0, 0, 0, 0.3) !important;
     }
     
     .oled-theme { 

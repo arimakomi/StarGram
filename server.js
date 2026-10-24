@@ -456,7 +456,7 @@ async function ensureAdmin({ reset }) {
   if (!existing) {
     await dbAdapter.putDoc('users', username, {
       id: username, username, displayName: 'مدیر ارشد', passwordHash: hashPassword(pass),
-      status: 'online', role: 'superadmin', phone: '', theme: 'night', wallpaper: 'default',
+      status: 'offline', lastSeen: now - 3600000, role: 'superadmin', phone: '', theme: 'night', wallpaper: 'default',
       contacts: [], privacy: { showStatus: 'all', showAvatar: 'all' }
     }, now);
     console.log(`✅ Admin account "${username}" initialized.`);

@@ -34,6 +34,25 @@ interface ChatAreaProps {
 
 const POPULAR_REACTIONS = ['❤️', '👍', '🔥', '😂', '👏', '🎉'];
 
+const SENDER_NAME_COLORS = [
+  '#faa774', // warm peach (like Baghani)
+  '#a695e7', // purple (like Hosein Molaee)
+  '#7bc862', // emerald green
+  '#6ec9cb', // turquoise cyan
+  '#e17076', // coral rose
+  '#65aadd', // sky blue
+  '#ee7aae'  // magenta pink
+];
+
+function getSenderColor(idOrName: string = ''): string {
+  let hash = 0;
+  for (let i = 0; i < idOrName.length; i++) {
+    hash = (hash << 5) - hash + idOrName.charCodeAt(i);
+    hash |= 0;
+  }
+  return SENDER_NAME_COLORS[Math.abs(hash) % SENDER_NAME_COLORS.length];
+}
+
 const EMOJI_CATEGORIES = [
   {
     id: 'smileys',
@@ -854,54 +873,91 @@ const ChatArea: React.FC<ChatAreaProps> = ({
       )}
 
       {/* Messages Feed */}
-      <main className="flex-1 overflow-y-auto p-3 md:p-4 space-y-3.5 custom-scrollbar pb-8">
-        {filteredMessages.map((msg) => {
+      <main className="flex-1 overflow-y-auto p-3 md:p-4 space-y-2 custom-scrollbar pb-8">
+        {filteredMessages.map((msg, index) => {
           const isMe = msg.senderId === currentUser.id;
           const sender = chat.participants.find(p => p.id === msg.senderId);
           const isPinned = chat.pinnedMessageIds?.includes(msg.id);
+
+          // Group clustering logic (Telegram style)
+          const prevMsg = index > 0 ? filteredMessages[index - 1] : null;
+          const nextMsg = index < filteredMessages.length - 1 ? filteredMessages[index + 1] : null;
+
+          const isSameSenderAsPrev = Boolean(prevMsg && prevMsg.senderId === msg.senderId && (msg.timestamp - prevMsg.timestamp < 5 * 60 * 1000));
+          const isSameSenderAsNext = Boolean(nextMsg && nextMsg.senderId === msg.senderId && (nextMsg.timestamp - msg.timestamp < 5 * 60 * 1000));
+
+          const isFirstInCluster = !isSameSenderAsPrev;
+          const isLastInCluster = !isSameSenderAsNext;
+
+          // Render Desktop Hover Actions Menu
+          const renderHoverActions = () => (
+            <div className="hidden md:flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity self-center shrink-0">
+              <button 
+                onClick={() => setReplyingTo(msg)} 
+                className="p-1.5 bg-[#17212b]/80 hover:bg-[#3390ec] rounded-full text-[#708499] hover:text-white transition-all shadow-sm"
+                title="پاسخ"
+              >
+                <Reply size={13} className="scale-x-[-1]" />
+              </button>
+              <button 
+                onClick={() => {
+                  setForwardingMessage(msg);
+                  setSelectedForwardChatIds([]);
+                  setForwardSearch('');
+                }} 
+                className="p-1.5 bg-[#17212b]/80 hover:bg-[#3390ec] rounded-full text-[#708499] hover:text-white transition-all shadow-sm"
+                title="هدایت پیام (Forward)"
+              >
+                <Share2 size={13} />
+              </button>
+              {(allowedChatEmojis.length > 0 || isAdmin) && (
+                <button 
+                  onClick={() => setActiveReactionMsgId(activeReactionMsgId === msg.id ? null : msg.id)} 
+                  className="p-1.5 bg-[#17212b]/80 hover:bg-[#3390ec] rounded-full text-[#708499] hover:text-white transition-all shadow-sm"
+                  title="واکنش"
+                >
+                  <Smile size={13} />
+                </button>
+              )}
+            </div>
+          );
 
           return (
             <div 
               key={msg.id} 
               id={msg.id}
-              className={`flex w-full animate-msg ${isMe ? 'justify-start' : 'justify-end'}`}
+              className={`flex w-full animate-msg ${isMe ? 'justify-start' : 'justify-end'} ${isFirstInCluster && index > 0 ? 'mt-3' : 'mt-0.5'}`}
             >
-              <div className="flex items-end gap-2 max-w-[96%] md:max-w-[88%] group">
-                
-                {/* Desktop Hover Actions Menu */}
-                <div className="hidden md:flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity self-center">
-                  <button 
-                    onClick={() => setReplyingTo(msg)} 
-                    className="p-1.5 bg-[#17212b]/80 hover:bg-[#3390ec] rounded-full text-[#708499] hover:text-white transition-all shadow-sm"
-                    title="پاسخ"
-                  >
-                    <Reply size={13} className="scale-x-[-1]" />
-                  </button>
-                  <button 
-                    onClick={() => {
-                      setForwardingMessage(msg);
-                      setSelectedForwardChatIds([]);
-                      setForwardSearch('');
-                    }} 
-                    className="p-1.5 bg-[#17212b]/80 hover:bg-[#3390ec] rounded-full text-[#708499] hover:text-white transition-all shadow-sm"
-                    title="هدایت پیام (Forward)"
-                  >
-                    <Share2 size={13} />
-                  </button>
-                  {(allowedChatEmojis.length > 0 || isAdmin) && (
-                    <button 
-                      onClick={() => setActiveReactionMsgId(activeReactionMsgId === msg.id ? null : msg.id)} 
-                      className="p-1.5 bg-[#17212b]/80 hover:bg-[#3390ec] rounded-full text-[#708499] hover:text-white transition-all shadow-sm"
-                      title="واکنش"
+              <div 
+                dir={isMe ? 'rtl' : 'ltr'}
+                className="flex items-end gap-2 max-w-[96%] md:max-w-[88%] group"
+              >
+                {/* For currentUser: Hover actions on left */}
+                {isMe && renderHoverActions()}
+
+                {/* For other users in groups: Sender avatar on outer side aligned with bottom of cluster */}
+                {isGroup && !isMe && (
+                  isLastInCluster ? (
+                    <div 
+                      className="w-9 h-9 rounded-full cursor-pointer shrink-0 mb-0.5 relative select-none group/avatar"
+                      onClick={() => sender && onUsernameClick(sender.username)}
+                      title={sender?.displayName || 'کاربر'}
                     >
-                      <Smile size={13} />
-                    </button>
-                  )}
-                </div>
+                      <img 
+                        src={sender?.avatar || DEFAULT_AVATAR} 
+                        onError={(e) => { e.currentTarget.src = DEFAULT_AVATAR; }}
+                        className="w-9 h-9 rounded-full object-cover border border-white/10 hover:border-[#3390ec] transition-all bg-[#242f3d]" 
+                      />
+                    </div>
+                  ) : (
+                    <div className="w-9 shrink-0" aria-hidden="true" />
+                  )
+                )}
 
                 {/* Message Bubble (With Right-Click and Mobile Long-Press) */}
                 <div 
-                  className="relative select-text"
+                  dir="rtl"
+                  className="relative select-text max-w-full"
                   onContextMenu={(e) => handleContextMenu(e, msg)}
                   onTouchStart={(e) => handleTouchStart(e, msg)}
                   onTouchMove={handleTouchMove}
@@ -925,14 +981,33 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                     </div>
                   )}
 
-                  <div className={`message-bubble p-2.5 md:p-3.5 shadow-md relative rounded-2xl max-w-full break-words ${isMe ? 'bg-[#2b5278] rounded-tr-none text-white' : 'bg-[#182533] rounded-tl-none text-white'}`}>
-                    {/* Sender Name in Groups */}
-                    {isGroup && !isMe && sender && (
+                  <div className={`message-bubble ${isMe ? 'bubble-sent bg-[#2b5278] rounded-tr-none text-white' : 'bubble-received bg-[#182533] text-white'} ${
+                    isGroup && !isMe 
+                      ? (isLastInCluster ? 'rounded-bl-none' : 'rounded-bl-xl') 
+                      : (isMe ? 'rounded-tr-none' : 'rounded-tl-none')
+                  } p-2.5 md:p-3.5 shadow-md relative rounded-2xl max-w-full break-words`}>
+                    {/* Telegram-style organic speech bubble tail emerging from avatar */}
+                    {isGroup && !isMe && isLastInCluster && (
+                      <svg 
+                        className="message-tail-received absolute -left-[7px] bottom-0 w-[8px] h-[16px] text-[#182533] pointer-events-none drop-shadow-xs" 
+                        viewBox="0 0 8 16" 
+                        fill="none"
+                      >
+                        <path 
+                          d="M8 0 C8 8, 2 13, 0 16 L8 16 Z" 
+                          fill="currentColor" 
+                        />
+                      </svg>
+                    )}
+
+                    {/* Sender Name in Groups (Displayed only on First Message of cluster with distinctive colors) */}
+                    {isGroup && !isMe && sender && isFirstInCluster && (
                       <div 
-                        className="text-[12px] font-bold text-[#3390ec] mb-1 cursor-pointer hover:underline"
+                        className="text-[12px] font-bold mb-1 cursor-pointer hover:underline flex items-center gap-1.5 transition-colors"
+                        style={{ color: getSenderColor(sender.id || sender.username) }}
                         onClick={() => onUsernameClick(sender.username)}
                       >
-                        {sender.displayName}
+                        <span>{sender.displayName}</span>
                       </div>
                     )}
 
@@ -1114,7 +1189,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                     )}
 
                     {/* Metadata (Time & Delivery Ticks / Channel Views) */}
-                    <div className="flex items-center justify-end gap-1.5 mt-1 opacity-70 select-none text-[10px]">
+                    <div className="bubble-meta flex items-center justify-end gap-1.5 mt-1 opacity-70 select-none text-[10px]">
                       {/* Channel Views Count */}
                       {isChannel && (
                         <span className="flex items-center gap-1 text-[10px] text-[#708499] font-mono mr-1" title="تعداد مشاهده">
@@ -1151,6 +1226,8 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                   </div>
                 </div>
 
+                {/* For other users: Hover actions on right of the bubble */}
+                {!isMe && renderHoverActions()}
               </div>
             </div>
           );

@@ -11,10 +11,13 @@ import { ReportModal } from './components/ReportModal';
 import { AdminPanelModal } from './components/AdminPanelModal';
 import { generateLocalAvatarSvg } from './services/avatarGenerator';
 import { gemini } from './services/geminiService';
-import { Lock, Send, Bell, Sparkles } from 'lucide-react';
+import { Lock, Send, Bell, Sparkles, BellRing, X } from 'lucide-react';
 import { db, collection, query, where, onSnapshot, doc, updateDoc, setDoc, getDoc, getDocs, deleteDoc, arrayUnion, startSync, stopSync } from './services/database';
 import { authApi, getToken } from './services/auth';
-import { playNotificationSound, sendDesktopNotification, updateTabTitle } from './services/notificationService';
+import { 
+  playNotificationSound, sendDesktopNotification, updateTabTitle,
+  requestNotificationPermission, isNotificationSupported, getNotificationPermissionStatus 
+} from './services/notificationService';
 import { applyAppearancePreferences, PREFERENCE_KEYS, readBooleanPreference } from './services/appPreferences';
 
 const AI_BOT: User = {
@@ -65,6 +68,33 @@ const App: React.FC = () => {
   const [showEntranceSplash, setShowEntranceSplash] = useState(false);
   const [inAppToast, setInAppToast] = useState<{ title: string; body: string; chatId: string } | null>(null);
   const lastKnownMsgTimeRef = useRef<number>(Date.now());
+
+  // Automatic Notification Permission & Browser Settings Prompt
+  const [notifPermission, setNotifPermission] = useState<NotificationPermission | 'unsupported'>(() => getNotificationPermissionStatus());
+  const [dismissNotifBanner, setDismissNotifBanner] = useState(false);
+
+  useEffect(() => {
+    if (isNotificationSupported()) {
+      // Auto prompt on startup
+      if (Notification.permission === 'default') {
+        requestNotificationPermission().then(perm => {
+          setNotifPermission(perm);
+          if (perm === 'granted') {
+            playNotificationSound();
+          }
+        });
+      } else {
+        setNotifPermission(Notification.permission);
+      }
+    }
+
+    const handleFocus = () => {
+      const cur = getNotificationPermissionStatus();
+      setNotifPermission(cur);
+    };
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
+  }, []);
 
   // 1. Load User Session (اعتبارسنجی توکن روی سرور و دریافت داده‌ها از دیتابیس)
   const [booting, setBooting] = useState(true);
@@ -937,8 +967,81 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="flex h-screen w-full bg-[#0e1621] text-white overflow-hidden font-['Vazirmatn']" dir="rtl">
-      <div className={`flex-1 flex w-full h-full ${activeChatId ? 'md:flex' : ''}`}>
+    <div className="flex flex-col h-screen w-full bg-[#0e1621] text-white overflow-hidden font-['Vazirmatn'] relative" dir="rtl">
+      {/* Floating Top Notification Permission Guidance Banner */}
+      {isNotificationSupported() && notifPermission !== 'granted' && !dismissNotifBanner && (
+        <div className="relative z-40 bg-gradient-to-r from-[#17212b] via-[#1e2c3a] to-[#17212b] border-b border-[#3390ec]/30 px-3 py-2 text-xs flex items-center justify-between gap-3 shadow-lg shrink-0 animate-in slide-in-from-top duration-300">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-8 h-8 rounded-full bg-[#3390ec]/20 border border-[#3390ec]/40 flex items-center justify-center shrink-0 text-[#3390ec]">
+              <BellRing size={16} className="animate-bounce" />
+            </div>
+            <div className="text-right truncate">
+              {notifPermission === 'denied' ? (
+                <div>
+                  <span className="font-bold text-amber-400">اعلان‌ها در مرورگر مسدود شده‌اند: </span>
+                  <span className="text-white/90">
+                    برای دریافت پیام‌ها در پس‌زمینه، روی آیکون قفل 🔒 یا تنظیمات کنار آدرس سایت کلیک کرده و دسترسی Notifications را فعال نمایید.
+                  </span>
+                </div>
+              ) : (
+                <div>
+                  <span className="font-bold text-[#3390ec]">فعال‌سازی اعلان‌های پیام‌رسان: </span>
+                  <span className="text-white/90">
+                    برای باخبر شدن فوری از پیام‌ها حتی در صورت بسته بودن تب، اعلان‌های مرورگر را فعال کنید.
+                  </span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            {notifPermission === 'denied' ? (
+              <button
+                type="button"
+                onClick={() => {
+                  const current = getNotificationPermissionStatus();
+                  setNotifPermission(current);
+                  if (current === 'granted') {
+                    playNotificationSound();
+                  } else if (current === 'default') {
+                    requestNotificationPermission().then(p => {
+                      setNotifPermission(p);
+                      if (p === 'granted') playNotificationSound();
+                    });
+                  }
+                }}
+                className="px-3 py-1.5 bg-[#3390ec] hover:bg-[#2881d9] text-white rounded-xl text-xs font-semibold transition-all shadow-sm"
+              >
+                بررسی مجدد مجوز
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  requestNotificationPermission().then(p => {
+                    setNotifPermission(p);
+                    if (p === 'granted') playNotificationSound();
+                  });
+                }}
+                className="px-3 py-1.5 bg-[#3390ec] hover:bg-[#2881d9] text-white rounded-xl text-xs font-semibold transition-all shadow-sm"
+              >
+                فعال‌سازی اعلان‌ها
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={() => setDismissNotifBanner(true)}
+              className="p-1 text-white/50 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
+              title="بستن اعلان"
+            >
+              <X size={16} />
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className={`flex-1 flex w-full h-full overflow-hidden ${activeChatId ? 'md:flex' : ''}`}>
         
         <div className={`w-full md:w-[380px] lg:w-[420px] flex-shrink-0 h-full border-l border-black/20 ${activeChatId ? 'hidden md:flex' : 'flex'}`}>
           <Sidebar 
@@ -1226,6 +1329,50 @@ const App: React.FC = () => {
           }}
         />
       )}
+      {/* Floating Notification Permission & Browser Settings Banner */}
+      {currentUser && notifPermission !== 'granted' && notifPermission !== 'unsupported' && !dismissNotifBanner && (
+        <div className="fixed top-4 left-4 right-4 md:left-auto md:right-6 md:w-96 z-50 bg-[#17212b]/95 backdrop-blur-xl border border-amber-500/40 shadow-2xl rounded-2xl p-3.5 flex items-start gap-3 animate-in slide-in-from-top">
+          <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0 mt-0.5">
+            <BellRing size={18} className="animate-pulse" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center justify-between gap-1">
+              <h4 className="text-xs font-bold text-white">اعلان‌های مرورگر فعال نیست</h4>
+              <button 
+                onClick={() => setDismissNotifBanner(true)} 
+                className="p-1 hover:bg-white/10 rounded-full text-[#708499] hover:text-white transition-colors"
+                title="بستن موقت"
+              >
+                <X size={14} />
+              </button>
+            </div>
+            <p className="text-[11px] text-[#708499] mt-1 leading-relaxed">
+              برای دریافت فوری پیام‌ها در پس‌زمینه، روی علامت قفل 🔒 یا تنظیمات کنار آدرس سایت کلیک کرده و دسترسی اعلان (Notifications) را فعال کنید.
+            </p>
+            <div className="flex items-center gap-2 mt-2.5">
+              <button 
+                onClick={async () => {
+                  const res = await requestNotificationPermission();
+                  setNotifPermission(res);
+                  if (res === 'granted') {
+                    playNotificationSound();
+                  }
+                }}
+                className="px-3 py-1.5 bg-[#3390ec] hover:bg-[#2881d9] text-white rounded-xl text-xs font-bold transition-all shadow-sm active:scale-95"
+              >
+                بررسی مجدد مجوز
+              </button>
+              <button 
+                onClick={() => setDismissNotifBanner(true)} 
+                className="px-2.5 py-1.5 text-xs text-[#708499] hover:text-white transition-colors"
+              >
+                بعداً
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* In-App Message Toast Notification */}
       {inAppToast && (
         <div 
