@@ -463,11 +463,11 @@ const ChatArea: React.FC<ChatAreaProps> = ({
         <div className="absolute w-[350px] h-[350px] bg-red-500/5 rounded-full blur-3xl pointer-events-none -bottom-10 -left-10" />
 
         <div className="relative z-10 max-w-md w-full flex flex-col items-center text-center space-y-6">
-          {/* Logo Badge with StarChat Symbol */}
-          <div className="relative group cursor-pointer">
-            <div className="absolute -inset-3 bg-gradient-to-tr from-[#3390ec]/30 via-red-500/20 to-blue-600/30 rounded-3xl blur-xl opacity-40 group-hover:opacity-80 transition duration-500" />
-            <div className="relative w-24 h-24 bg-gradient-to-b from-[#1e2a38] to-[#17212b] border border-white/10 rounded-3xl flex items-center justify-center shadow-2xl p-2 empty-chat-card">
-              <StarChatLogo variant="symbol" size={80} />
+          {/* Logo Badge with Centered StarChat Symbol */}
+          <div className="relative group cursor-pointer flex items-center justify-center">
+            <div className="absolute -inset-4 bg-gradient-to-tr from-[#3390ec]/25 via-red-500/20 to-blue-600/25 rounded-3xl blur-xl opacity-40 group-hover:opacity-80 transition duration-500 pointer-events-none" />
+            <div className="relative w-28 h-28 bg-gradient-to-b from-[#1e2a38] to-[#17212b] border border-white/10 rounded-3xl flex items-center justify-center shadow-2xl empty-chat-card">
+              <StarChatLogo variant="symbol" size={86} />
             </div>
           </div>
 

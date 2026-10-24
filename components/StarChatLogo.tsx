@@ -30,10 +30,10 @@ export const StarChatLogo: React.FC<StarChatLogoProps> = ({
     );
   }
 
-  // Symbol variant: Perfectly framed view of the signature red & navy star speech bubbles
+  // Symbol variant: Perfectly centered signature red & navy star speech bubbles
   return (
     <div
-      className={`relative overflow-hidden shrink-0 select-none flex items-center justify-center rounded-2xl ${className}`}
+      className={`relative overflow-hidden shrink-0 select-none flex items-center justify-center ${className}`}
       style={{ width: `${size}px`, height: `${size}px` }}
     >
       <img
@@ -41,9 +41,9 @@ export const StarChatLogo: React.FC<StarChatLogoProps> = ({
         alt="StarChat"
         className={`absolute max-w-none pointer-events-none select-none transition-transform ${imgClassName}`}
         style={{
-          width: `${size * 2.3}px`,
-          height: `${size * 2.3}px`,
-          left: `${size * 0.04}px`,
+          width: `${size * 2.15}px`,
+          height: `${size * 2.15}px`,
+          left: `${size * -0.029}px`,
           top: '50%',
           transform: 'translateY(-50%)'
         }}

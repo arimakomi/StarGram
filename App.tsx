@@ -922,7 +922,18 @@ const App: React.FC = () => {
     return hydratedChats.find((c: Chat) => c.id === activeChatId) || null;
   };
 
-  if (booting) return <div className="min-h-screen bg-[#0e1621] flex items-center justify-center text-[#8b98a5] font-['Vazirmatn']" dir="rtl">در حال بارگذاری…</div>;
+  if (booting) {
+    return (
+      <div className="min-h-screen bg-[#0e1621] flex flex-col items-center justify-center p-6 text-white overflow-hidden font-['Vazirmatn'] select-none relative" dir="rtl">
+        <div className="absolute w-[500px] h-[500px] bg-[#3390ec]/15 rounded-full blur-3xl pointer-events-none animate-pulse" />
+        <div className="relative mb-3 group cursor-pointer w-full flex items-center justify-center">
+          <div className="absolute -inset-6 bg-gradient-to-r from-red-500/20 via-[#3390ec]/25 to-blue-600/20 rounded-full blur-2xl opacity-60 pointer-events-none" />
+          <StarChatLogo variant="full" height={180} className="relative max-w-full drop-shadow-2xl animate-pop" />
+        </div>
+        <p className="text-xs text-[#708499] animate-pulse mt-2">در حال بارگذاری پیام‌رسان...</p>
+      </div>
+    );
+  }
   if (!currentUser) return <Login onLogin={handleAuth} />;
 
   // Lock Screen (UI Only - Same as before)
@@ -1405,13 +1416,14 @@ const App: React.FC = () => {
 
           {/* Spacious Modern Welcome Card */}
           <div className="relative z-10 max-w-sm w-full p-8 bg-[#17212b]/90 border border-white/10 rounded-3xl backdrop-blur-md shadow-2xl flex flex-col items-center text-center space-y-6">
-            {/* Glowing StarChat Logo */}
-            <div className="relative flex items-center justify-center my-2 group">
-              <div className="absolute w-36 h-36 rounded-full bg-[#3390ec]/20 animate-ping opacity-35" />
-              <div className="absolute w-44 h-44 rounded-full bg-red-500/10 animate-pulse" />
-              <div className="relative p-2.5 rounded-3xl bg-white/5 border border-white/10 backdrop-blur-xs transform animate-pop shadow-2xl">
-                <StarChatLogo variant="full" height={85} className="drop-shadow-lg" />
-              </div>
+            {/* Glowing StarChat Logo (No square box, large size matching login page) */}
+            <div className="relative my-2 group cursor-pointer w-full flex items-center justify-center">
+              <div className="absolute -inset-6 bg-gradient-to-r from-red-500/20 via-[#3390ec]/25 to-blue-600/20 rounded-full blur-2xl opacity-60 group-hover:opacity-100 transition-opacity pointer-events-none" />
+              <StarChatLogo 
+                variant="full" 
+                height={180} 
+                className="relative max-w-full transform hover:scale-105 transition-transform drop-shadow-2xl animate-pop" 
+              />
             </div>
 
             {/* Title & Slogan */}
