@@ -3,7 +3,7 @@ import { GroupEditModal } from './GroupEditModal';
 import { ChannelEditModal } from './ChannelEditModal';
 import { StarChatLogo } from './StarChatLogo';
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Chat, User, Message, Poll, DEFAULT_AVATAR, AdminPermissions } from '../types';
+import { Chat, User, Message, Poll, DEFAULT_AVATAR, AdminPermissions, SystemConfig } from '../types';
 import { 
   Send, Paperclip, Smile, MessageCircle, Trash, Mic, Info, X, 
   ChevronLeft, UserMinus, UserPlus, Image as ImageIcon, 
@@ -31,6 +31,7 @@ interface ChatAreaProps {
   chats?: Chat[];
   onOpenSavedMessages?: () => void;
   onReportMessage?: (message: Message) => void;
+  systemConfig?: SystemConfig;
 }
 
 const POPULAR_REACTIONS = ['❤️', '👍', '🔥', '😂', '👏', '🎉'];
@@ -93,7 +94,7 @@ const DEFAULT_ADMIN_PERMISSIONS: AdminPermissions = {
 
 const ChatArea: React.FC<ChatAreaProps> = ({ 
   chat, currentUser, isTyping, onAction, onDeleteChat, onBack, onUsernameClick, onToggleContact,
-  chats = [], onOpenSavedMessages, onReportMessage
+  chats = [], onOpenSavedMessages, onReportMessage, systemConfig
 }) => {
   const [inputText, setInputText] = useState('');
   const [showInfo, setShowInfo] = useState(false);
@@ -463,21 +464,24 @@ const ChatArea: React.FC<ChatAreaProps> = ({
         <div className="absolute w-[350px] h-[350px] bg-red-500/5 rounded-full blur-3xl pointer-events-none -bottom-10 -left-10" />
 
         <div className="relative z-10 max-w-md w-full flex flex-col items-center text-center space-y-6">
-          {/* Logo Badge with Centered StarChat Symbol */}
-          <div className="relative group cursor-pointer flex items-center justify-center">
-            <div className="absolute -inset-4 bg-gradient-to-tr from-[#3390ec]/25 via-red-500/20 to-blue-600/25 rounded-3xl blur-xl opacity-40 group-hover:opacity-80 transition duration-500 pointer-events-none" />
-            <div className="relative w-28 h-28 bg-gradient-to-b from-[#1e2a38] to-[#17212b] border border-white/10 rounded-3xl flex items-center justify-center shadow-2xl empty-chat-card">
-              <StarChatLogo variant="symbol" size={86} />
-            </div>
+          {/* Logo with Ambient Glow (Clean, No Square Box, Large and Centered) */}
+          <div className="relative group cursor-pointer flex flex-col items-center justify-center my-2">
+            <div className="absolute -inset-8 bg-gradient-to-r from-red-500/20 via-[#3390ec]/25 to-blue-600/20 rounded-full blur-2xl opacity-60 group-hover:opacity-100 transition-opacity pointer-events-none" />
+            <StarChatLogo
+              variant="symbol"
+              size={135}
+              src={systemConfig?.customSymbolUrl}
+              className="relative drop-shadow-2xl animate-pop transition-transform hover:scale-105"
+            />
           </div>
 
           {/* Heading with Generous Spacing */}
           <div className="space-y-2">
             <h2 className="text-2xl font-black text-white tracking-wide">
-              پیام‌رسان استارلی چت
+              {systemConfig?.appName ? `پیام‌رسان ${systemConfig.appName}` : 'پیام‌رسان استارلی چت'}
             </h2>
             <p className="text-xs text-[#708499] leading-relaxed">
-              ارتباطی امن، ابری و بدون محدودیت با رمزنگاری پیشرفته سراسری
+              {systemConfig?.appSlogan || 'ارتباطی امن، ابری و بدون محدودیت با رمزنگاری پیشرفته سراسری'}
             </p>
           </div>
 

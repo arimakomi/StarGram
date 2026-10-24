@@ -11,13 +11,13 @@ StarGram is an open-source, self-hosted web messenger with a Persian right-to-le
 
 The Pages site hosts project information and documentation only. Run the messenger and its API on your own Node.js server.
 
-**User guides:** [Help index](help/README.md) · [Web messenger guides](help/web/README.md) · [Administrator panel guide](help/web/admin-panel.md) · [App/PWA status](help/app/README.md)
+**User guides:** [Help index](help/README.md) · [REST API reference](help/api.fa.md) · [Web messenger guides](help/web/README.md) · [Administrator panel guide](help/web/admin-panel.md) · [App/PWA status](help/app/README.md)
 
 ## Features
 
 - Private and group chats, channels, search, replies, editing, reactions, and pinned messages
 - Image and voice messages, stories, and browser notifications
-- User, report, group, channel, and system configuration management
+- User, report, group, channel, branding, API token, and system configuration management
 - Themes and chat wallpapers; default avatars are generated locally as SVG
 - PostgreSQL and MySQL/MariaDB, with local JSON storage as a fallback
 - Optional Gemini assistant with configurable API key, model, and proxy
@@ -38,7 +38,7 @@ Documentation is organized by audience and topic:
 
 ## Administrator panel
 
-The web panel is available to system administrators and has separate sections for system-wide feature switches, user reports, user accounts, groups and channels, and database data. Admins can review reports, manage account roles and access, lock or remove a chat, configure optional Gemini assistance, and export or restore local JSON data. The database area also contains a destructive emergency wipe control; take an independent backup and verify the target before using destructive actions. See the [administrator panel guide](help/web/admin-panel.md).
+The web panel is available to system administrators and has separate sections for system settings, branding, API tokens, reports, users, groups and channels, and database data. Admins can review reports, manage account roles and access, lock or remove a chat, configure optional Gemini assistance, customize the app name and logos, issue or revoke API tokens, and export or restore local JSON data. The database area also contains a destructive emergency wipe control; take an independent backup and verify the target before using destructive actions. See the [administrator panel guide](help/web/admin-panel.md) and [REST API reference](help/api.fa.md).
 
 ## Requirements
 

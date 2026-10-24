@@ -200,6 +200,19 @@ export interface MessageReport {
   status: 'pending' | 'resolved' | 'dismissed';
 }
 
+export interface ApiToken {
+  id: string;
+  name: string;
+  tokenPrefix: string;
+  createdAt: number;
+  lastUsedAt?: number;
+  expiresAt?: number;
+  scopes?: string[];
+  createdBy?: string;
+  createdByName?: string;
+  token?: string; // Only present on creation for user copy
+}
+
 export interface SystemConfig {
   allowRegistration?: boolean;
   allowGroupCreation?: boolean;
@@ -211,4 +224,13 @@ export interface SystemConfig {
   geminiEnabled?: boolean;
   geminiProxyUrl?: string;
   geminiModel?: string;
+
+  // Branding & Identity Customization
+  appName?: string;
+  appSlogan?: string;
+  welcomeMessage?: string;
+  loginBannerUrl?: string;
+  customLogoUrl?: string;
+  customSymbolUrl?: string;
+  accentColor?: string;
 }

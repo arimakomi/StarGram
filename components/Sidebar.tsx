@@ -440,9 +440,9 @@ const Sidebar: React.FC<SidebarProps> = ({
         <div 
           onClick={() => setShowDrawer(true)}
           className="cursor-pointer hover:opacity-85 transition-opacity shrink-0"
-          title="استارلی چت"
+          title={systemConfig?.appName || 'استارلی چت'}
         >
-          <StarChatLogo variant="symbol" size={32} />
+          <StarChatLogo variant="symbol" size={32} src={systemConfig?.customSymbolUrl} />
         </div>
       </div>
 
@@ -971,8 +971,8 @@ const Sidebar: React.FC<SidebarProps> = ({
 
                 <div className="pt-3 pb-1 px-3 flex items-center justify-between text-[11px] text-[#708499] border-t border-white/5 mt-2">
                   <div className="flex items-center gap-2">
-                    <StarChatLogo variant="symbol" size={20} />
-                    <span className="font-medium">استارلی چت</span>
+                    <StarChatLogo variant="symbol" size={20} src={systemConfig?.customSymbolUrl} />
+                    <span className="font-medium">{systemConfig?.appName || 'استارلی چت'}</span>
                   </div>
                   <span className="font-mono text-[10px] opacity-70">Cloud Edition</span>
                 </div>
