@@ -76,9 +76,31 @@ Content-Type: application/json
 | `POST` | `/api/v1/auth/register` | ثبت‌نام کاربر جدید |
 | `GET` | `/api/v1/auth/me` | دریافت اطلاعات حساب کاربری وارد شده |
 
+### و) مدیریت دستگاه‌ها، نشست‌ها و اعلان‌ها (Sessions & Devices)
+| متد | مسیر | توضیحات |
+|---|---|---|
+| `GET` | `/api/v1/sessions` | فهرست نشست‌های فعال کاربر (با متادیتای سیستم‌عامل، مرورگر، وضعیت آنلاین و دسترسی اعلان) |
+| `GET` | `/api/v1/sessions/:id` | دریافت جزئیات و متادیتای یک نشست مشخص |
+| `PATCH` | `/api/v1/sessions/:id/notifications` | ویرایش دسترسی اعلان هر دستگاه (`enabled`، `previewText`، `sound`، `muteUntil`) |
+| `DELETE` | `/api/v1/sessions/:id` | خاتمه دادن به یک نشست مشخص و لغو دسترسی دستگاه |
+| `POST` | `/api/v1/sessions/terminate-others` | خاتمه دادن به تمام نشست‌های دیگر کاربر به جز نشست جاری |
+
 ---
 
-## ۴. نمونه کدهای عملی
+## ۴. ساختار شیء تنظیمات اعلان نشست (SessionNotificationSettings)
+
+```json
+{
+  "enabled": true,        // فعال یا غیرفعال بودن کلی اعلان‌ها
+  "previewText": true,    // نمایش متن پیام در کادر اعلان
+  "sound": true,          // پخش صدای زنگ
+  "muteUntil": 1740000000 // زمان پایان بی‌صدا موقت (میلی‌ثانیه) یا null
+}
+```
+
+---
+
+## ۵. نمونه کدهای عملی
 
 ### ۱. جاوااسکریپت / Node.js
 ```javascript

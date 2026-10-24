@@ -136,11 +136,42 @@ export function sendDesktopNotification(
 }
 
 /**
- * Updates document title unread counter
+ * Dispatches notification based on the active session's notification permissions
  */
+export function notifyIncomingMessage(
+  senderName: string,
+  text: string,
+  avatar?: string,
+  onClick?: () => void
+): void {
+  try {
+    let raw = null;
+    try {
+      raw = localStorage.getItem('starly_session_notif_prefs');
+    } catch {}
+    const notifs = raw ? JSON.parse(raw) : { enabled: true, previewText: true, sound: true };
+
+    if (!notifs.enabled) return;
+    if (notifs.muteUntil && Date.now() < notifs.muteUntil) return;
+
+    if (notifs.sound) {
+      playNotificationSound();
+    }
+
+    const bodyText = notifs.previewText && text ? text : 'پیام جدید دریافت شد';
+    sendDesktopNotification(senderName, {
+      body: bodyText,
+      icon: avatar || '/assets/aistudio/starchat-minimal.png',
+      onClick
+    });
+  } catch (err) {
+    console.warn('notifyIncomingMessage error:', err);
+  }
+}
+
 export function updateTabTitle(unreadCount: number): void {
   if (typeof document === 'undefined') return;
-  const baseTitle = 'استارلی چت | StarGram';
+  const baseTitle = 'StarGram';
   if (unreadCount > 0) {
     document.title = `(${unreadCount}) ${baseTitle}`;
   } else {

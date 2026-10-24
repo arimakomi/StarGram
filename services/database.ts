@@ -66,7 +66,7 @@ function notifyCollectionListeners(collectionName: string) {
 
 // ───────────── ذخیره‌سازی: حافظه محلی + همگام‌سازی با دیتابیس سرور (PostgreSQL / MySQL / Local) ─────────────
 const memoryStore = new Map<string, Record<string, any>>();
-const SYNC_COLLECTIONS = ['users', 'chats', 'stories', 'system_config', 'reports'];
+const SYNC_COLLECTIONS = ['users', 'chats', 'stories', 'system_config', 'reports', 'user_sessions'];
 const POLL_MS = 2500;
 const CONNECTED_POLL_MS = 10000;
 

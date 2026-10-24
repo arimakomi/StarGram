@@ -20,6 +20,7 @@ import {
   requestNotificationPermission, isNotificationSupported, getNotificationPermissionStatus 
 } from './services/notificationService';
 import { applyAppearancePreferences, PREFERENCE_KEYS, readBooleanPreference } from './services/appPreferences';
+import { initOrUpdateCurrentSession, subscribeUserSessions, getCachedLocalSessionNotifs } from './services/sessionService';
 
 const AI_BOT: User = {
   id: 'ai-assistant',
@@ -183,7 +184,30 @@ const App: React.FC = () => {
     return () => unsubscribe();
   }, [currentUser]);
 
-  // Incoming Message Notifications & Audio Chime
+  // Session registration & Remote Termination Listener
+  const handleLogout = useCallback(async () => {
+    try {
+      localStorage.removeItem('starly_session_cloud');
+      await authApi.logout();
+    } catch {}
+    stopSync();
+    setCurrentUser(null);
+  }, []);
+
+  useEffect(() => {
+    if (!currentUser) return;
+    initOrUpdateCurrentSession(currentUser).catch(console.error);
+
+    const unsub = subscribeUserSessions(currentUser.id, (_sessions, isCurrentTerminated) => {
+      if (isCurrentTerminated) {
+        alert('این نشست از طریق دستگاه دیگری خاتمه یافته است.');
+        handleLogout();
+      }
+    });
+    return () => unsub();
+  }, [currentUser?.id, handleLogout]);
+
+  // Incoming Message Notifications & Audio Chime (Respecting Per-Session Rules)
   useEffect(() => {
     if (!currentUser || chats.length === 0) return;
     const incomingList: { msg: Message; chat: Chat }[] = [];
@@ -200,15 +224,23 @@ const App: React.FC = () => {
       incomingList.sort((a, b) => b.msg.timestamp - a.msg.timestamp);
       const newestIncoming = incomingList[0];
       lastKnownMsgTimeRef.current = newestIncoming.msg.timestamp;
-      const isMuted = newestIncoming.chat.isMuted;
+
+      const sessionNotifs = getCachedLocalSessionNotifs();
+      const isSessionMuted = sessionNotifs.muteUntil ? sessionNotifs.muteUntil > Date.now() : false;
+      const isSessionDisabled = sessionNotifs.enabled === false;
+      const isMuted = newestIncoming.chat.isMuted || isSessionMuted || isSessionDisabled;
+
       if (!isMuted) {
-        if (readBooleanPreference(PREFERENCE_KEYS.soundEnabled)) playNotificationSound();
+        if (sessionNotifs.sound !== false && readBooleanPreference(PREFERENCE_KEYS.soundEnabled)) {
+          playNotificationSound();
+        }
         const chatTitle = newestIncoming.chat.type === 'private'
           ? (newestIncoming.chat.participants.find((p: User) => p.id === newestIncoming.msg.senderId)?.displayName || 'پیام جدید')
           : (newestIncoming.chat.groupName || 'گروه');
         
+        const showPreview = sessionNotifs.previewText !== false && readBooleanPreference(PREFERENCE_KEYS.previewTextEnabled);
         sendDesktopNotification(chatTitle, {
-          body: readBooleanPreference(PREFERENCE_KEYS.previewTextEnabled)
+          body: showPreview
             ? (newestIncoming.msg.text || (newestIncoming.msg.imageUrl ? 'تصویر' : 'رسانه جدید'))
             : 'پیام جدید',
           onClick: () => setActiveChatId(newestIncoming.chat.id)
@@ -217,7 +249,9 @@ const App: React.FC = () => {
         if (activeChatId !== newestIncoming.chat.id) {
           setInAppToast({
             title: chatTitle,
-            body: newestIncoming.msg.text || (newestIncoming.msg.imageUrl ? 'تصویر' : 'رسانه جدید'),
+            body: showPreview
+              ? (newestIncoming.msg.text || (newestIncoming.msg.imageUrl ? 'تصویر' : 'رسانه جدید'))
+              : 'پیام جدید دریافت شد',
             chatId: newestIncoming.chat.id
           });
           setTimeout(() => setInAppToast(null), 4000);

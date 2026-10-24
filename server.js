@@ -1429,6 +1429,107 @@ app.get('/api/v1/auth/me', auth, (req, res) => {
   res.json({ success: true, user: publicUser(req.user), isApiToken: !!req.isApiToken });
 });
 
+// ───────────── ۹. مدیریت نشست‌ها و دسترسی اعلان دستگاه‌ها (Sessions & Notifications API) ─────────────
+
+// دریافت فهرست نشست‌های کاربر
+app.get('/api/v1/sessions', auth, wrap(async (req, res) => {
+  const targetUserId = (isAdmin(req.user) && req.query.userId) ? String(req.query.userId).trim() : req.user.id;
+  const rows = await dbAdapter.getCollectionDocs('user_sessions');
+
+  const sessions = rows
+    .filter(r => !r.deleted)
+    .map(r => typeof r.data === 'string' ? JSON.parse(r.data) : r.data)
+    .filter(s => s && s.userId === targetUserId)
+    .sort((a, b) => (b.lastActiveAt || 0) - (a.lastActiveAt || 0));
+
+  res.json({
+    success: true,
+    userId: targetUserId,
+    total: sessions.length,
+    sessions
+  });
+}));
+
+// دریافت اطلاعات یک نشست خاص
+app.get('/api/v1/sessions/:id', auth, wrap(async (req, res) => {
+  const id = req.params.id;
+  const session = await dbAdapter.getDoc('user_sessions', id);
+  if (!session) return res.status(404).json({ success: false, message: 'نشست مورد نظر یافت نشد.' });
+  if (session.userId !== req.user.id && !isAdmin(req.user)) {
+    return res.status(403).json({ success: false, message: 'اجازه دسترسی به این نشست را ندارید.' });
+  }
+  res.json({ success: true, session });
+}));
+
+// ویرایش دسترسی و تنظیمات اعلان یک نشست
+app.patch('/api/v1/sessions/:id/notifications', auth, wrap(async (req, res) => {
+  const id = req.params.id;
+  const session = await dbAdapter.getDoc('user_sessions', id);
+  if (!session) return res.status(404).json({ success: false, message: 'نشست مورد نظر یافت نشد.' });
+  if (session.userId !== req.user.id && !isAdmin(req.user)) {
+    return res.status(403).json({ success: false, message: 'اجازه تغییر تنظیمات این نشست را ندارید.' });
+  }
+
+  const { enabled, previewText, sound, muteUntil } = req.body || {};
+  session.notifications = session.notifications || { enabled: true, previewText: true, sound: true };
+
+  if (typeof enabled === 'boolean') session.notifications.enabled = enabled;
+  if (typeof previewText === 'boolean') session.notifications.previewText = previewText;
+  if (typeof sound === 'boolean') session.notifications.sound = sound;
+  if (muteUntil === null || muteUntil === undefined) {
+    if ('muteUntil' in (req.body || {})) delete session.notifications.muteUntil;
+  } else if (typeof muteUntil === 'number') {
+    session.notifications.muteUntil = muteUntil;
+  }
+
+  const now = Date.now();
+  await dbAdapter.putDoc('user_sessions', id, session, now);
+  res.json({
+    success: true,
+    message: 'تنظیمات دسترسی اعلان نشست با موفقیت به‌روزرسانی شد.',
+    notifications: session.notifications,
+    session
+  });
+}));
+
+// خاتمه دادن به یک نشست مشخص
+app.delete('/api/v1/sessions/:id', auth, wrap(async (req, res) => {
+  const id = req.params.id;
+  const session = await dbAdapter.getDoc('user_sessions', id);
+  if (!session) return res.status(404).json({ success: false, message: 'نشست مورد نظر یافت نشد.' });
+  if (session.userId !== req.user.id && !isAdmin(req.user)) {
+    return res.status(403).json({ success: false, message: 'اجازه خاتمه دادن به این نشست را ندارید.' });
+  }
+
+  const now = Date.now();
+  await dbAdapter.deleteDoc('user_sessions', id, now);
+  res.json({ success: true, message: `نشست «${session.deviceName || id}» با موفقیت خاتمه یافت.` });
+}));
+
+// خاتمه دادن به همه نشست‌های دیگر کاربر جاری به جز یک نشست مشخص
+app.post('/api/v1/sessions/terminate-others', auth, wrap(async (req, res) => {
+  const currentSessionId = req.body?.currentSessionId || req.headers['x-session-id'];
+  const targetUserId = req.user.id;
+  const rows = await dbAdapter.getCollectionDocs('user_sessions');
+  const now = Date.now();
+  let terminatedCount = 0;
+
+  for (const r of rows) {
+    if (r.deleted) continue;
+    const s = typeof r.data === 'string' ? JSON.parse(r.data) : r.data;
+    if (!s || s.userId !== targetUserId) continue;
+    if (currentSessionId && s.id === currentSessionId) continue;
+    await dbAdapter.deleteDoc('user_sessions', s.id, now);
+    terminatedCount++;
+  }
+
+  res.json({
+    success: true,
+    message: `${terminatedCount} نشست فعال دیگر با موفقیت خاتمه یافتند.`,
+    terminatedCount
+  });
+}));
+
 // فایل‌های استاتیک
 app.use('/assets', express.static(path.join(DIST_DIR, 'assets'), { maxAge: '1y', immutable: true }));
 app.use(express.static(DIST_DIR));

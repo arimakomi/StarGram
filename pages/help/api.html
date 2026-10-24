@@ -245,6 +245,59 @@ Response: { "success": true, "token": "...", "user": { ... } }</code></pre>
 Body: { "username": "sara", "password": "SecurePassword", "displayName": "سارا" }</code></pre>
           <pre><code>GET /api/v1/auth/me
 Header: Authorization: Bearer &lt;USER_TOKEN&gt;</code></pre>
+
+          <h3 style="margin-top:2rem">و) مدیریت نشست‌ها و دسترسی اعلان‌ها (Sessions & Notifications)</h3>
+          <p>امکان دریافت دستگاه‌های متصل به حساب، خاتمه دادن به سشن‌ها و تفکیک دسترسی نوتیفیکیشن برای هر دستگاه:</p>
+          <table class="api-table" style="width:100%; border-collapse:collapse; margin-top:1rem; font-size:13px">
+            <thead>
+              <tr style="border-bottom:2px solid #242f3d; text-align:right">
+                <th style="padding:8px">متد</th>
+                <th style="padding:8px">مسیر</th>
+                <th style="padding:8px">توضیحات</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr style="border-bottom:1px solid #242f3d">
+                <td style="padding:8px"><code style="color:#10b981">GET</code></td>
+                <td style="padding:8px"><code>/api/v1/sessions</code></td>
+                <td style="padding:8px">فهرست نشست‌های فعال کاربر جاری به همراه متادیتای سیستم‌عامل، مرورگر و تنظیمات نوتیف</td>
+              </tr>
+              <tr style="border-bottom:1px solid #242f3d">
+                <td style="padding:8px"><code style="color:#10b981">GET</code></td>
+                <td style="padding:8px"><code>/api/v1/sessions/:id</code></td>
+                <td style="padding:8px">دریافت جزئیات یک نشست مشخص با شناسه <code>:id</code></td>
+              </tr>
+              <tr style="border-bottom:1px solid #242f3d">
+                <td style="padding:8px"><code style="color:#f59e0b">PATCH</code></td>
+                <td style="padding:8px"><code>/api/v1/sessions/:id/notifications</code></td>
+                <td style="padding:8px">تنظیم دسترسی اعلان این دستگاه (<code>enabled</code>, <code>previewText</code>, <code>sound</code>, <code>muteUntil</code>)</td>
+              </tr>
+              <tr style="border-bottom:1px solid #242f3d">
+                <td style="padding:8px"><code style="color:#ef4444">DELETE</code></td>
+                <td style="padding:8px"><code>/api/v1/sessions/:id</code></td>
+                <td style="padding:8px">خاتمه دادن به نشست دستگاه مشخص و قطع دسترسی آن</td>
+              </tr>
+              <tr style="border-bottom:1px solid #242f3d">
+                <td style="padding:8px"><code style="color:#3b82f6">POST</code></td>
+                <td style="padding:8px"><code>/api/v1/sessions/terminate-others</code></td>
+                <td style="padding:8px">خاتمه دادن به تمام نشست‌های فعال دیگر به جز نشست جاری</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div style="margin-top:1rem">
+            <strong>نمونه بدنه درخواست برای تغییر دسترسی اعلان نشست:</strong>
+            <pre><code>PATCH /api/v1/sessions/sess_1740000000_abc/notifications
+Header: Authorization: Bearer &lt;USER_TOKEN&gt;
+Content-Type: application/json
+
+{
+  "enabled": true,
+  "previewText": false,
+  "sound": true,
+  "muteUntil": 1740100000000
+}</code></pre>
+          </div>
         </section>
 
         <section style="margin-top:2rem">
