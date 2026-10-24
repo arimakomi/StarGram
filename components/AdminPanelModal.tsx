@@ -1798,31 +1798,35 @@ const handleExecutePanic = async () => {
 
             
             {/* Panic Wipe Danger Zone */}
-            <div className="bg-red-500/10 border-2 border-red-500/30 rounded-2xl p-4.5 space-y-3">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-red-500/20 border border-red-500/40 text-red-400 flex items-center justify-center shrink-0">
-                  <AlertOctagon size={22} className="animate-pulse" />
-                </div>
-                <div className="flex-1">
-                  <div className="flex items-center gap-2">
-                    <h4 className="text-sm font-bold text-red-300">عملیات اضطراری: دکمه پنیک (System Panic & Wipe)</h4>
-                    <span className="text-[10px] bg-red-500/20 text-red-300 border border-red-500/30 px-2 py-0.5 rounded-full font-bold">بحرانی</span>
+            <div className="relative isolate overflow-hidden rounded-2xl border border-red-500/35 bg-gradient-to-br from-red-500/10 via-[#171b23] to-[#171b23] p-4 shadow-lg shadow-red-950/10 sm:p-5">
+              <div className="pointer-events-none absolute inset-y-0 right-0 w-1 bg-gradient-to-b from-red-400/80 via-red-600/50 to-transparent" />
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
+                <div className="flex min-w-0 items-start gap-3 sm:items-center">
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-red-500/40 bg-red-500/15 text-red-400">
+                    <AlertOctagon size={22} />
                   </div>
-                  <p className="text-xs text-red-300/80 leading-relaxed mt-0.5">
-                    با فشردن این دکمه و تأیید نهایی، تمامی پایگاه‌داده (شامل کل گفتگوها، پیام‌ها، کاربران، فایل‌ها، گزارش‌ها و نشست‌ها) بدون امکان بازگشت نابود و پاکسازی کامل می‌شوند.
-                  </p>
+                  <div className="min-w-0 flex-1 space-y-1.5">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h4 className="text-sm font-bold leading-6 text-red-200">عملیات اضطراری: دکمه پنیک</h4>
+                      <span className="rounded-full border border-red-400/30 bg-red-500/15 px-2 py-0.5 text-[10px] font-bold text-red-300">بحرانی</span>
+                    </div>
+                    <p className="max-w-3xl text-xs leading-6 text-red-100/70">
+                      با فشردن این دکمه و تأیید نهایی، تمامی پایگاه‌داده (شامل کل گفتگوها، پیام‌ها، کاربران، فایل‌ها، گزارش‌ها و نشست‌ها) بدون امکان بازگشت نابود و پاکسازی کامل می‌شوند.
+                    </p>
+                  </div>
                 </div>
-              </div>
               <button
                 onClick={() => {
                   setPanicConfirmInput('');
                   setPanicError('');
                   setShowPanicModal(true);
                 }}
-                className="w-full py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold transition-all shadow-md active:scale-98 flex items-center justify-center gap-2"
+                className="inline-flex w-full shrink-0 items-center justify-center gap-2 rounded-xl border border-red-300/20 bg-red-600 px-4 py-3 text-xs font-bold text-white shadow-md shadow-red-950/20 transition-all hover:bg-red-500 active:scale-[0.98] sm:w-auto sm:min-w-64 sm:py-3.5"
               >
-                <AlertOctagon size={16}/> اجرای عملیات پنیک و نابودی کل دیتابیس
+                <AlertOctagon size={16} className="shrink-0" />
+                <span>اجرای عملیات پنیک</span>
               </button>
+              </div>
             </div>
 
             {/* Active Database Engine Badge */}
