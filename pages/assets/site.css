@@ -1,3 +1,10 @@
+@font-face {
+  font-family: "B Koodak";
+  src: url("./fonts/B-Koodak-Bold.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 400 900;
+  font-display: swap;
+}
 :root {
   color-scheme: dark;
   --bg: #09121d;
@@ -9,7 +16,7 @@
   --brand: #59b5f7;
   --brand-2: #36d3b4;
   --warning: #ffd685;
-  font-family: Vazirmatn, "Segoe UI", Tahoma, Arial, sans-serif;
+  font-family: "B Koodak", Vazirmatn, "Segoe UI", Tahoma, Arial, sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
 }
