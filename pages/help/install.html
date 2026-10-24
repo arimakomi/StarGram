@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="fa" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#09121d"><meta name="description" content="نصب تعاملی و دستی، تنظیم پایگاه داده، دامنه و HTTPS."><title>نصب و استقرار | راهنمای StarGram</title><link rel="icon" href="../assets/stargram-logo.png" type="image/png"><link rel="stylesheet" href="../assets/site.css"></head>
+<body><header class="topbar"><div class="shell nav"><a class="brand" href="../"><img class="brand-logo" src="../assets/stargram-logo.png" alt="لوگوی StarGram"><span>StarGram</span></a><nav class="nav-links" aria-label="ناوبری"><a href="../#features">امکانات</a><a href="../#install">نصب</a><a class="button secondary" href="./index.html">مرکز راهنما</a><a href="https://github.com/arimakomi/StarGram">GitHub ↗</a></nav></div></header><main class="shell"><div class="help-layout"><aside class="toc" aria-label="فهرست راهنما"><strong>راهنمای StarGram</strong><a href="./index.html">نمای کلی و فهرست</a><a href="./install.html" aria-current="page">نصب و استقرار</a><a href="./account.html">حساب و گفتگوهای خصوصی</a><a href="./groups.html">گروه‌ها</a><a href="./channels.html">کانال‌ها</a><a href="./messages.html">پیام‌ها و محتوا</a><a href="./settings.html">تنظیمات و وب‌اپ</a><a href="./server.html">مدیریت سرور</a><a href="./security.html">امنیت و رفع اشکال</a></aside><article class="doc"><section id="requirements" data-search="پیش نیاز سیستم عامل node npm لینوکس root requirements">
+          <h2>۲. پیش‌نیازها و انتخاب روش نصب</h2>
+          <ul><li>سرور Linux با دسترسی root یا sudo برای نصب‌کننده تعاملی؛</li><li>Node.js نسخه ۱۸ یا بالاتر و npm؛ نصب‌کننده در صورت نیاز Node.js 20 LTS را نصب می‌کند؛</li><li>اتصال اینترنت برای دریافت سورس و وابستگی‌ها؛</li><li>برای حالت SQL، یک سرور PostgreSQL یا MySQL/MariaDB در دسترس؛</li><li>برای سرویس systemd خودکار، سیستم‌عامل باید systemd داشته باشد.</li></ul>
+          <p>برای VPS تازه، نصب‌کننده تعاملی ساده‌ترین گزینه است. نصب دستی زمانی مناسب است که بخواهید وابستگی‌ها، متغیرهای محیطی یا اجرای سرویس را خودتان مدیریت کنید. داده JSON برای نصب سریع کار می‌کند؛ برای سرویس مهم و پرترافیک، پایگاه داده SQL و برنامه پشتیبان‌گیری مستقل را در نظر بگیرید.</p>
+        </section>
+<section id="install" data-search="نصب سریع linux linux bash setup.sh server root install">
+          <h2>۳. نصب سریع روی لینوکس</h2>
+          <p>اسکریپت نصب را با دسترسی مدیر اجرا کنید. فرمان نخست اسکریپت را از شاخه <code>main</code> می‌گیرد و نصب را آغاز می‌کند:</p>
+          <pre><code>sudo bash &lt;(curl -fsSL https://raw.githubusercontent.com/arimakomi/StarGram/main/setup.sh)</code></pre>
+          <p>اگر shell شما process substitution را پشتیبانی نمی‌کند، دو مرحله‌ای اجرا کنید:</p>
+          <pre><code>curl -fsSL https://raw.githubusercontent.com/arimakomi/StarGram/main/setup.sh -o setup.sh
+sudo bash setup.sh</code></pre>
+          <h3>پاسخ به پرسش‌های نصب‌کننده</h3>
+          <ol><li><b>پورت HTTP:</b> به‌طور پیش‌فرض 3000 است. اگر اشغال است، شماره آزاد 1 تا 65535 انتخاب کنید.</li><li><b>نام مدیر:</b> ۳ تا ۳۲ نویسه، بدون فاصله یا اسلش.</li><li><b>رمز مدیر:</b> حداقل ۶ نویسه؛ رمز قوی و یکتا انتخاب کنید. اگر خالی بگذارید، نصب‌کننده یک مقدار تصادفی می‌سازد و فقط در خروجی همان لحظه نشان می‌دهد؛ آن را ذخیره کنید.</li><li><b>نوع پایگاه داده:</b> <code>local</code> برای JSON، <code>postgres</code> برای PostgreSQL یا <code>mysql</code> برای MySQL/MariaDB.</li><li><b>تنظیمات اتصال SQL:</b> میزبان، پورت، نام پایگاه داده و حساب SQL را وارد کنید. اگر رمز خالی باشد نصب‌کننده آن را تولید و در فایل محدودشده <code>.env</code> ذخیره می‌کند.</li></ol>
+          <p>نصب‌کننده وابستگی‌ها را نصب می‌کند، build فرانت‌اند را اجرا می‌کند، حساب مدیر را مقداردهی می‌کند و اگر systemd موجود باشد سرویس <code>stargram</code> را فعال می‌کند. سپس فرمان مدیریت <code>stargram</code> را در مسیر اجرایی سیستم قرار می‌دهد.</p>
+          <h3>نصب غیرتعاملی با ذخیره JSON</h3>
+          <pre><code>sudo NONINTERACTIVE=1 PORT=3000 \
+  ADMIN_USER=admin ADMIN_PASS='Replace-With-A-Long-Unique-Password' \
+  DB_TYPE=local bash setup.sh</code></pre>
+          <p>این نمونه زمانی مناسب است که فایل <code>setup.sh</code> را در پوشه پروژه گرفته‌اید. برای استفاده امن، رمز نمونه را با رمز واقعی و قوی جایگزین کنید و آن را در history یا فایل عمومی قرار ندهید.</p>
+          <h3>پایان نصب</h3>
+          <p>نصب‌کننده IP و پورت دسترسی را چاپ می‌کند. پیش از استفاده عمومی، دامنه و HTTPS را طبق فصل <a href="#production">دامنه و HTTPS</a> تنظیم کنید. اگر سرویس خودکار اجرا نشد، فرمان‌های وضعیت و log در فصل <a href="./server.html#cli">مدیریت سرور</a> آمده‌اند.</p>
+        </section>
+<section id="manual-install" data-search="نصب دستی git clone npm ci build init start manual">
+          <h2>۴. نصب دستی</h2>
+          <p>Node.js 18+، npm و Git باید نصب باشند. مخزن را دریافت و وابستگی‌ها را نصب کنید:</p>
+          <pre><code>git clone https://github.com/arimakomi/StarGram.git
+cd StarGram
+npm ci
+cp .env.example .env</code></pre>
+          <p>ویرایش کنید و حداقل این مقادیر را در <code>.env</code> قرار دهید:</p>
+          <pre><code>PORT=3000
+DB_TYPE=local
+ADMIN_USER=admin
+ADMIN_PASS=ReplaceWithALongUniquePassword</code></pre>
+          <p>سپس build، مقداردهی حساب مدیر و اجرای سرور:</p>
+          <pre><code>npm run build
+node server.js --init
+npm start</code></pre>
+          <p>فرمان <code>--init</code> حساب مدیر مشخص‌شده در <code>ADMIN_USER</code> را ایجاد می‌کند؛ اگر حساب وجود داشته باشد، رمز آن را با <code>ADMIN_PASS</code> تنظیم می‌کند. برای اجرای طولانی‌مدت روی سرور، سرویس systemd یا مدیر فرایند مناسب راه‌اندازی کنید. فرمان <code>npm start</code> به‌تنهایی، ترمینال جاری را اشغال می‌کند.</p>
+          <h3>توسعه محلی</h3>
+          <p>در یک ترمینال API سرور را با <code>npm start</code> اجرا کنید و در ترمینال دوم <code>npm run dev</code> را بزنید. Vite درخواست‌های <code>/api</code> را به سرور محلی روی پورت 3000 می‌فرستد.</p>
+        </section>
+<section id="database" data-search="پایگاه داده database postgres mysql json local environment">
+          <h2>۵. پایگاه داده</h2>
+          <div class="table-wrap"><table><thead><tr><th>DB_TYPE</th><th>موتور</th><th>ذخیره داده</th></tr></thead><tbody><tr><td><code>local</code></td><td>JSON</td><td><code>data/stargram_db.json</code></td></tr><tr><td><code>postgres</code></td><td>PostgreSQL</td><td>پایگاه داده SQL تنظیم‌شده</td></tr><tr><td><code>mysql</code></td><td>MySQL / MariaDB</td><td>پایگاه داده SQL تنظیم‌شده</td></tr></tbody></table></div>
+          <p>مقادیر SQL را می‌توان با متغیرهای محیطی تنظیم کرد:</p>
+          <pre><code>DB_TYPE=postgres
+DB_HOST=127.0.0.1
+DB_PORT=5432
+DB_NAME=stargram
+DB_USER=stargram
+DB_PASS=ChangeThisPassword</code></pre>
+          <p>برای MySQL/MariaDB مقدار <code>DB_TYPE=mysql</code> و پورت متداول 3306 است. <code>DATABASE_URL</code> نیز پشتیبانی می‌شود و اگر تنظیم شده باشد بر متغیرهای اتصال جداگانه اولویت دارد. مقادیر واقعی رمز و آدرس پایگاه داده را در GitHub commit نکنید.</p>
+          <p>سرور در صورت عدم دسترسی به SQL می‌تواند به ذخیره‌سازی JSON محلی بازگردد. از روی باز شدن صفحه به‌تنهایی نتیجه نگیرید که SQL متصل است؛ وضعیت موتور را در پنل مدیریت یا با <code>sudo stargram status</code> بررسی کنید.</p>
+        </section>
+<section id="production" data-search="https tls nginx caddy reverse proxy domain production">
+          <h2>۶. دامنه، HTTPS و استقرار عمومی</h2>
+          <p>سرور برنامه HTTP ارائه می‌کند و TLS را خودش خاتمه نمی‌دهد. برای دسترسی عمومی، دامنه را به IP سرور وصل کنید و Nginx یا Caddy را به‌عنوان reverse proxy با گواهی معتبر HTTPS تنظیم کنید. پورت برنامه را از اینترنت عمومی ببندید یا دسترسی آن را محدود کنید و فقط پورت‌های وب proxy را باز بگذارید.</p>
+          <ul><li>برای محیط عمومی از HTTPS استفاده کنید؛ مرورگر برای اعلان و PWA به secure context نیاز دارد.</li><li>فایل <code>.env</code>، پوشه <code>data</code> و پشتیبان‌ها را از دسترسی وب مستقیم خارج نگه دارید.</li><li>برای uploadهای بزرگ، محدودیت بدنه درخواست proxy را بررسی کنید.</li><li>پس از تنظیم DNS و TLS، ورود، ارسال پیام و اتصال WebSocket/API را از بیرون سرور آزمایش کنید.</li><li>برای دستورهای دقیق proxy، از مستندات نسخه توزیع و reverse proxy خود استفاده کنید.</li></ul>
+          <div class="callout">خود مخزن GitHub Pages برای همین سایت راهنما استفاده می‌شود؛ برنامه StarGram روی سرور جداگانه شما اجرا می‌شود.</div>
+        </section></article></div></main><footer class="footer"><div class="shell footer-inner"><span>StarGram · راهنمای فارسی</span><span><a href="../">صفحه اصلی</a> · <a href="./index.html">همهٔ راهنماها</a> · <a href="https://github.com/arimakomi/StarGram">کد منبع</a></span></div></footer></body></html>

@@ -28,6 +28,7 @@ pre code { padding: 0; border: 0; background: none; }
 .nav { min-height: 70px; display: flex; align-items: center; justify-content: space-between; gap: 1.2rem; }
 .brand { display: inline-flex; gap: .65rem; align-items: center; color: var(--text); font-weight: 900; font-size: 1.08rem; }
 .brand-mark { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 13px; color: #07121c; background: linear-gradient(135deg, var(--brand), var(--brand-2)); box-shadow: 0 8px 30px #36d3b433; }
+.brand-logo { display: block; width: 46px; height: 46px; object-fit: contain; }
 .nav-links { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; font-size: .9rem; }
 .nav-links a { color: var(--muted); }
 .nav-links a:hover { color: var(--text); }
@@ -71,6 +72,7 @@ th { color: var(--brand-2); }
 .toc { position: sticky; top: 90px; max-height: calc(100vh - 110px); overflow: auto; border: 1px solid var(--line); border-radius: 16px; background: #0d1926; padding: 1rem; }
 .toc strong { display: block; margin-bottom: .45rem; }
 .toc a { display: block; color: var(--muted); font-size: .87rem; padding: .22rem .1rem; }
+.toc a[aria-current="page"] { color: var(--brand-2); font-weight: 800; }
 .doc { min-width: 0; }
 .doc > section { scroll-margin-top: 90px; padding: 1.5rem; margin-bottom: 1rem; border: 1px solid var(--line); border-radius: 18px; background: linear-gradient(150deg, #122235, #0d1825); }
 .doc > section p, .doc > section li { color: #c2d1df; }
@@ -80,5 +82,10 @@ th { color: var(--brand-2); }
 .doc details { border: 1px solid var(--line); border-radius: 12px; padding: .7rem .9rem; margin: .6rem 0; background: #ffffff04; }
 .doc summary { font-weight: 800; cursor: pointer; }
 .badge { display: inline-block; padding: .1rem .55rem; border-radius: 999px; background: #36d3b419; color: #7ce7d3; font-size: .8rem; }
+.help-intro { padding-bottom: 1.2rem; }
+.help-intro input { display: block; width: min(100%, 620px); padding: .85rem 1rem; margin-top: .35rem; border: 1px solid var(--line); border-radius: 12px; background: #0b1723; color: var(--text); font: inherit; }
+.guide-card { color: var(--text); transition: transform .18s ease, border-color .18s ease; }
+.guide-card:hover { color: var(--text); text-decoration: none; transform: translateY(-3px); border-color: #59b5f766; }
+.guide-open { display: inline-block; margin-top: .8rem; color: var(--brand); font-size: .9rem; font-weight: 800; }
 @media (max-width: 800px) { .hero-grid { grid-template-columns: 1fr; } .grid { grid-template-columns: repeat(2, 1fr); } .help-layout { grid-template-columns: 1fr; } .toc { position: static; max-height: 260px; } }
 @media (max-width: 520px) { .shell { width: min(100% - 1.1rem, 1120px); } .nav { align-items: flex-start; padding-block: .7rem; flex-direction: column; } .nav-links { gap: .65rem; } .grid { grid-template-columns: 1fr; } .hero-card { padding: 1rem; } .doc > section { padding: 1rem; } }

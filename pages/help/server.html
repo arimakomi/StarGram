@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="fa" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#09121d"><meta name="description" content="پنل مدیر، فرمان stargram، به‌روزرسانی و پشتیبان‌گیری."><title>مدیریت سرور | راهنمای StarGram</title><link rel="icon" href="../assets/stargram-logo.png" type="image/png"><link rel="stylesheet" href="../assets/site.css"></head>
+<body><header class="topbar"><div class="shell nav"><a class="brand" href="../"><img class="brand-logo" src="../assets/stargram-logo.png" alt="لوگوی StarGram"><span>StarGram</span></a><nav class="nav-links" aria-label="ناوبری"><a href="../#features">امکانات</a><a href="../#install">نصب</a><a class="button secondary" href="./index.html">مرکز راهنما</a><a href="https://github.com/arimakomi/StarGram">GitHub ↗</a></nav></div></header><main class="shell"><div class="help-layout"><aside class="toc" aria-label="فهرست راهنما"><strong>راهنمای StarGram</strong><a href="./index.html">نمای کلی و فهرست</a><a href="./install.html">نصب و استقرار</a><a href="./account.html">حساب و گفتگوهای خصوصی</a><a href="./groups.html">گروه‌ها</a><a href="./channels.html">کانال‌ها</a><a href="./messages.html">پیام‌ها و محتوا</a><a href="./settings.html">تنظیمات و وب‌اپ</a><a href="./server.html" aria-current="page">مدیریت سرور</a><a href="./security.html">امنیت و رفع اشکال</a></aside><article class="doc"><section id="admin" data-search="پنل مدیریت admin users reports groups channels system Gemini settings">
+          <h2>۱۷. پنل مدیریت</h2><p>کاربری که مدیر سامانه است می‌تواند پنل مدیریت را از منوی برنامه باز کند. پنل برای تنظیم و نظارت بر کاربران، گزارش‌ها، گروه‌ها، کانال‌ها و تنظیمات سیستم است. دسترسی عادی نباید اختیار مدیر داشته باشد.</p>
+          <ul><li>مدیریت حساب‌ها و وضعیت کاربران؛</li><li>رسیدگی به گزارش‌ها و مدیریت گفتگوهای گروهی/کانالی؛</li><li>تنظیمات سامانه و اتصال اختیاری Gemini؛</li><li>خروجی و بازیابی پشتیبان JSON در حالت محلی.</li></ul>
+          <p>کلید API Gemini را فقط در پنل/تنظیم امن سرور وارد کنید؛ هرگز آن را در فایل‌های فرانت‌اند یا مخزن عمومی قرار ندهید. درخواست دستیار فقط وقتی ارسال می‌شود که قابلیت فعال و استفاده شود.</p>
+        </section>
+<section id="cli" data-search="stargram cli command status start stop restart logs health port backup admin update uninstall">
+          <h2>۱۸. مدیریت سرور با فرمان <code>stargram</code></h2><p>نصب‌کننده لینوکس فرمان مدیریت را ایجاد می‌کند. بسته به کاربر و دسترسی سرویس، آن را با <code>sudo</code> اجرا کنید:</p>
+          <pre><code>sudo stargram                 # Open the management menu
+sudo stargram status          # Service and database status
+sudo stargram start
+sudo stargram stop
+sudo stargram restart
+sudo stargram logs             # Recent logs
+sudo stargram logs follow      # Follow logs live
+sudo stargram health           # Check the health endpoint
+sudo stargram port 8080        # Change the HTTP port
+sudo stargram backup           # Create a backup
+sudo stargram admin            # Reset administrator credentials
+sudo stargram update           # Update application code
+sudo stargram help</code></pre>
+          <p>منوی تعاملی، promptها و خروجی ترمینال به انگلیسی هستند. زیر‌فرمان <code>port</code> پیکربندی پورت را تغییر می‌دهد؛ پس از تغییر، reverse proxy و firewall را نیز هماهنگ کنید. دستور uninstall را فقط پس از backup و بررسی داده‌ها اجرا کنید.</p>
+        </section>
+<section id="updates" data-search="به روز رسانی update github git pull not repository archive main">
+          <h2>۱۹. به‌روزرسانی</h2><p>برای نصب‌های ایجادشده با اسکریپت، از این فرمان استفاده کنید:</p><pre><code>sudo stargram update</code></pre><p>به‌روزرسانی نسخه شاخه <code>main</code> را مستقیم از GitHub دریافت می‌کند؛ بنابراین پوشه نصب لازم نیست Git repository باشد و خطای <code>fatal: not a git repository</code> از اجرای pull در پوشه غیر Git پیش نمی‌آید. فرمان از داده‌ها backup می‌گیرد، فایل‌های برنامه را تازه می‌کند، وابستگی‌ها را نصب و build را اجرا می‌کند، schema را آماده می‌کند و در صورت وجود systemd سرویس را restart می‌کند.</p><p>مواردی که حفظ می‌شوند: <code>data/</code>، <code>backups/</code>، فایل‌های <code>.env</code> و <code>node_modules/</code>. تغییرات محلی کد ممکن است بازنویسی شوند. قبل از آپدیت، پشتیبان مستقل بگیرید و سفارشی‌سازی کد را ثبت کنید.</p><p>اگر نصب را دستی انجام داده‌اید و مسیر Git checkout است، روش به‌روزرسانی شما می‌تواند متفاوت باشد؛ از فرمان مدیریت همین نصب یا روش نگهداری خودتان استفاده کنید و هم‌زمان دو روش را روی یک سرور اجرا نکنید.</p></section>
+<section id="backups" data-search="پشتیبان backup restore data json sql mysqldump pg_dump">
+          <h2>۲۰. پشتیبان‌گیری و بازیابی</h2><p>در حالت JSON، داده اصلی در <code>data/stargram_db.json</code> است. فرمان <code>sudo stargram backup</code> نسخه فشرده می‌سازد. در SQL، فرمان از ابزار dump موتور پایگاه داده استفاده می‌کند؛ utilityهای متناظر باید روی سرور نصب و اتصال دسترسی‌پذیر باشد.</p>
+          <p>پنل مدیریت نیز برای حالت محلی امکانات خروجی و بازیابی JSON دارد. بازیابی را ابتدا روی نسخه آزمایشی یا پس از گرفتن backup از داده فعلی انجام دهید؛ فایل نامتناسب یا قدیمی ممکن است داده تازه‌تر را جایگزین کند.</p>
+          <ul><li>فایل‌های backup را از document root وب دور نگه دارید.</li><li>پشتیبان را روی همان دیسکی که داده اصلی است تنها نسخه نگه ندارید.</li><li>برای SQL، علاوه بر برنامه StarGram، پایگاه داده را در برنامه backup دوره‌ای وارد کنید.</li><li>دوره‌ای مطمئن شوید backup قابل خواندن و بازیابی است.</li></ul>
+        </section></article></div></main><footer class="footer"><div class="shell footer-inner"><span>StarGram · راهنمای فارسی</span><span><a href="../">صفحه اصلی</a> · <a href="./index.html">همهٔ راهنماها</a> · <a href="https://github.com/arimakomi/StarGram">کد منبع</a></span></div></footer></body></html>
