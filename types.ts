@@ -234,3 +234,25 @@ export interface SystemConfig {
   customSymbolUrl?: string;
   accentColor?: string;
 }
+
+export interface SessionNotificationSettings {
+  enabled: boolean;          // دریافت اعلان دسکتاپ/وب روی این نشست
+  previewText: boolean;      // نمایش متن پیام در اعلان
+  sound: boolean;            // پخش صدای زنگ روی این نشست
+  muteUntil?: number;        // زمان پایان بی‌صدا بودن موقت (میلی‌ثانیه)
+}
+
+export interface UserSession {
+  id: string;                // شناسه یکتای نشست
+  userId: string;            // شناسه کاربر مالک
+  deviceName: string;        // نام کامل دستگاه (مثال: Chrome روی Windows 11)
+  browser: string;           // نام مرورگر
+  os: string;                // سیستم‌عامل
+  deviceType: 'desktop' | 'mobile' | 'tablet' | 'web';
+  ipAddress?: string;        // آدرس آی‌پی
+  location?: string;         // موقعیت حدودی (مثال: تهران، ایران)
+  createdAt: number;         // زمان ورود اولیه
+  lastActiveAt: number;      // آخرین فعالیت
+  isCurrent?: boolean;       // آیا کلاینت کنونی است؟
+  notifications: SessionNotificationSettings; // تنظیمات اعلان مستقل این نشست
+}
