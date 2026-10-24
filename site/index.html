@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#09121d">
+  <meta name="description" content="StarGram پیام‌رسان متن‌باز و خودمیزبان؛ قابلیت‌ها، راهنمای نصب سرور و مستندات کامل استفاده.">
+  <title>StarGram — پیام‌رسان خودمیزبان</title>
+  <link rel="stylesheet" href="./assets/site.css">
+</head>
+<body>
+  <header class="topbar"><div class="shell nav">
+    <a class="brand" href="./"><span class="brand-mark">✦</span><span>StarGram</span></a>
+    <nav class="nav-links" aria-label="ناوبری اصلی">
+      <a href="#features">امکانات</a><a href="#install">نصب</a><a href="#server">مدیریت سرور</a>
+      <a class="button secondary" href="./help/">راهنمای کامل</a>
+      <a href="https://github.com/arimakomi/StarGram">مخزن GitHub ↗</a>
+    </nav>
+  </div></header>
+
+  <main>
+    <section class="hero"><div class="shell hero-grid">
+      <div>
+        <span class="eyebrow"><span>●</span> متن‌باز · خودمیزبان · فارسی و راست‌چین</span>
+        <h1>پیام‌رسان خودت،<br>روی سرور خودت.</h1>
+        <p class="lead">StarGram یک پیام‌رسان وب برای گفتگوی خصوصی، گروه‌ها و کانال‌هاست. آن را روی سرور لینوکس خود نصب کن، داده‌ها را خودت نگه دار و با یک رابط فارسی گفتگو کن.</p>
+        <div class="actions">
+          <a class="button primary" href="#install">راهنمای نصب سرور <span>←</span></a>
+          <a class="button secondary" href="./help/">رفتن به راهنمای کامل</a>
+        </div>
+        <p class="muted">این سایت روی GitHub Pages فقط مستندات و معرفی پروژه را میزبانی می‌کند؛ اجرای پیام‌رسان و API به سرور Node.js نیاز دارد.</p>
+      </div>
+      <div class="hero-card" aria-label="پیش‌نمایش گفتگوها">
+        <div class="window-dots"><i></i><i></i><i></i></div>
+        <div class="chat-row"><span class="avatar">س</span><div><b>گفتگوی خصوصی</b><small>پیام‌ها و رسانه‌ها در یک جا</small></div></div>
+        <div class="chat-row"><span class="avatar">گ</span><div><b>گروه پروژه</b><small>گفتگوی تیمی و اشاره به اعضا</small></div></div>
+        <div class="chat-row"><span class="avatar">ک</span><div><b>کانال خبرها</b><small>انتشار برای مشترکان</small></div></div>
+        <div class="chat-row"><span class="avatar">✦</span><div><b>StarGram</b><small>قابل نصب به شکل PWA</small></div></div>
+      </div>
+    </div></section>
+
+    <section class="section" id="features"><div class="shell">
+      <div class="section-head"><span class="eyebrow">قابلیت‌ها</span><h2>برای گفتگوهای روزمره و مدیریت جامعه</h2><p>StarGram ابزارهای گفتگو، مدیریت و نگهداری داده را در یک برنامه خودمیزبان جمع می‌کند.</p></div>
+      <div class="grid">
+        <article class="card"><div class="icon">◉</div><h3>گفتگوی خصوصی</h3><p>پیام متنی، پاسخ، ویرایش، واکنش، سنجاق، ارسال مجدد و پیام‌های ذخیره‌شده.</p></article>
+        <article class="card"><div class="icon">♧</div><h3>گروه‌ها</h3><p>گروه عمومی یا خصوصی بساز، مخاطبان را دعوت کن و اعضا و مدیران را مدیریت کن.</p></article>
+        <article class="card"><div class="icon">▤</div><h3>کانال‌ها</h3><p>برای انتشار پیام به مشترکان کانال ایجاد کن و مدیر، لینک دعوت و واکنش‌ها را تنظیم کن.</p></article>
+        <article class="card"><div class="icon">▧</div><h3>رسانه و استوری</h3><p>تصویر، پیام صوتی، نظرسنجی و استوری تصویری، ویدئویی یا متنی ارسال کن.</p></article>
+        <article class="card"><div class="icon">◐</div><h3>تنظیمات شخصی</h3><p>تم، پس‌زمینه گفتگو، اندازه متن، اعلان‌ها، حریم خصوصی و رفتار نوشتن را انتخاب کن.</p></article>
+        <article class="card"><div class="icon">⌘</div><h3>مدیریت سرور</h3><p>پنل مدیریت، ابزار خط فرمان انگلیسی، ثبت گزارش، پشتیبان‌گیری و به‌روزرسانی مستقیم.</p></article>
+        <article class="card"><div class="icon">▦</div><h3>پایگاه داده انتخابی</h3><p>PostgreSQL یا MySQL/MariaDB برای سرور، یا فایل JSON محلی برای شروع ساده.</p></article>
+        <article class="card"><div class="icon">✧</div><h3>دستیار Gemini اختیاری</h3><p>در صورت نیاز، کلید و تنظیمات Gemini را از پنل مدیر وارد کن؛ برای اجرای پایه لازم نیست.</p></article>
+        <article class="card"><div class="icon">⬇</div><h3>وب‌اپ قابل نصب</h3><p>در مرورگر سازگار StarGram را به صفحه اصلی یا فهرست برنامه‌ها اضافه کن.</p></article>
+      </div>
+    </div></section>
+
+    <section class="section" id="install"><div class="shell">
+      <div class="section-head"><span class="eyebrow">نصب سریع</span><h2>راه‌اندازی روی سرور لینوکس</h2><p>اسکریپت نصب، Node.js، وابستگی‌ها، تنظیمات پایگاه داده و سرویس systemd را آماده می‌کند.</p></div>
+      <div class="callout">نصب‌کننده باید با دسترسی root اجرا شود. برای سرور عمومی، StarGram را پشت Nginx یا Caddy با HTTPS قرار بده. قبل از نصب، محتوای <a href="https://github.com/arimakomi/StarGram/blob/main/setup.sh">اسکریپت نصب</a> را بررسی کن.</div>
+      <h3>نصب تعاملی</h3>
+      <pre><code>sudo bash &lt;(curl -fsSL https://raw.githubusercontent.com/arimakomi/StarGram/main/setup.sh)</code></pre>
+      <p class="muted">در بعضی shellها، اجرای مستقیم process substitution با sudo پشتیبانی نمی‌شود. دستور قابل‌حمل‌تر:</p>
+      <pre><code>curl -fsSL https://raw.githubusercontent.com/arimakomi/StarGram/main/setup.sh -o setup.sh
+sudo bash setup.sh</code></pre>
+      <p>نصب‌کننده پورت، نام کاربری مدیر، رمز عبور و نوع پایگاه داده را می‌پرسد. برای شروع ساده، پایگاه داده <code>local</code> را انتخاب کن؛ برای استقرار جدی‌تر PostgreSQL یا MySQL/MariaDB را از قبل آماده کن.</p>
+      <h3>نصب غیرتعاملی با JSON محلی</h3>
+      <pre><code>sudo NONINTERACTIVE=1 PORT=3000 \
+  ADMIN_USER=admin ADMIN_PASS='Use-A-Long-Unique-Password' \
+  DB_TYPE=local bash setup.sh</code></pre>
+      <h3>بعد از نصب</h3>
+      <p>نشانی دسترسی و نام مدیر را از خروجی نصب‌کننده بردار. اگر رمز مدیر را نصب‌کننده تصادفی ساخته، همان لحظه آن را ذخیره کن؛ رمز تولیدشده در متن ساده نگهداری نمی‌شود. سپس دامنه و HTTPS را با reverse proxy تنظیم و ورود را از مرورگر بررسی کن.</p>
+      <div class="actions"><a class="button primary" href="./help/#install">تمام مراحل نصب و استقرار</a><a class="button secondary" href="./help/#database">تنظیم پایگاه داده</a></div>
+    </div></section>
+
+    <section class="section" id="server"><div class="shell">
+      <div class="section-head"><span class="eyebrow">نگهداری</span><h2>مدیریت و به‌روزرسانی</h2><p>پس از نصب، فرمان <code>stargram</code> برای مشاهده وضعیت سرویس و کارهای رایج در دسترس است.</p></div>
+      <div class="grid">
+        <article class="card"><h3>وضعیت و گزارش‌ها</h3><pre><code>sudo stargram status
+sudo stargram logs
+sudo stargram health</code></pre></article>
+        <article class="card"><h3>پشتیبان‌گیری</h3><pre><code>sudo stargram backup</code></pre><p>در حالت JSON نسخه فشرده می‌سازد؛ برای SQL از ابزار dump پایگاه داده استفاده می‌کند.</p></article>
+        <article class="card"><h3>به‌روزرسانی</h3><pre><code>sudo stargram update</code></pre><p>نسخه main را از GitHub می‌گیرد و به build و راه‌اندازی مجدد سرویس می‌رسد؛ حتی اگر پوشه نصب Git checkout نباشد.</p></article>
+      </div>
+      <p class="muted">پیش از به‌روزرسانی نسخه پشتیبان بگیر. به‌روزرسانی فایل‌های کد را جایگزین می‌کند و ممکن است تغییرات محلی کد را بازنویسی کند؛ فایل‌های داده، پشتیبان‌ها، تنظیمات <code>.env</code> و وابستگی‌ها حفظ می‌شوند.</p>
+    </div></section>
+
+    <section class="section"><div class="shell">
+      <div class="section-head"><span class="eyebrow">راهنما</span><h2>پاسخ پرسش‌ها را در /help پیدا کن</h2><p>راهنمای کامل از استفاده روزمره تا نصب، امنیت و رفع اشکال را پوشش می‌دهد.</p></div>
+      <div class="actions"><a class="button primary" href="./help/">باز کردن راهنمای کامل ←</a><a class="button secondary" href="https://github.com/arimakomi/StarGram/issues">گزارش مشکل در GitHub</a></div>
+    </div></section>
+  </main>
+  <footer class="footer"><div class="shell footer-inner"><span>StarGram · نرم‌افزار آزاد با مجوز MIT</span><span><a href="https://github.com/arimakomi/StarGram">کد منبع</a> · <a href="./help/">راهنما</a> · <a href="https://github.com/arimakomi/StarGram/blob/main/LICENSE">مجوز</a></span></div></footer>
+</body>
+</html>
