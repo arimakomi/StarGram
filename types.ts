@@ -244,13 +244,12 @@ export interface SessionNotificationSettings {
 
 export interface UserSession {
   id: string;                // شناسه یکتای نشست
+  authSessionId?: string;    // شناسه لغو نشست احراز هویت سرور
   userId: string;            // شناسه کاربر مالک
   deviceName: string;        // نام کامل دستگاه (مثال: Chrome روی Windows 11)
   browser: string;           // نام مرورگر
   os: string;                // سیستم‌عامل
   deviceType: 'desktop' | 'mobile' | 'tablet' | 'web';
-  ipAddress?: string;        // آدرس آی‌پی
-  location?: string;         // موقعیت حدودی (مثال: تهران، ایران)
   createdAt: number;         // زمان ورود اولیه
   lastActiveAt: number;      // آخرین فعالیت
   isCurrent?: boolean;       // آیا کلاینت کنونی است؟

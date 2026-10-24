@@ -196,15 +196,23 @@ const App: React.FC = () => {
 
   useEffect(() => {
     if (!currentUser) return;
-    initOrUpdateCurrentSession(currentUser).catch(console.error);
+    let cancelled = false;
+    let unsubscribe = () => {};
 
-    const unsub = subscribeUserSessions(currentUser.id, (_sessions, isCurrentTerminated) => {
-      if (isCurrentTerminated) {
-        alert('این نشست از طریق دستگاه دیگری خاتمه یافته است.');
-        handleLogout();
-      }
-    });
-    return () => unsub();
+    void initOrUpdateCurrentSession(currentUser).then(() => {
+      if (cancelled) return;
+      unsubscribe = subscribeUserSessions(currentUser.id, (_sessions, isCurrentTerminated) => {
+        if (isCurrentTerminated) {
+          alert('این نشست از طریق دستگاه دیگری خاتمه یافته است.');
+          handleLogout();
+        }
+      });
+    }).catch(console.error);
+
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
   }, [currentUser?.id, handleLogout]);
 
   // Incoming Message Notifications & Audio Chime (Respecting Per-Session Rules)

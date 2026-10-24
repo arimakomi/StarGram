@@ -2,10 +2,10 @@ import React, { useState, useEffect, useRef } from 'react';
 import { User, DEFAULT_AVATAR, UserSession, SessionNotificationSettings } from '../types';
 import { 
   X, Shield, ShieldCheck, Key, Check, Smartphone, Camera, LogOut, ChevronLeft, ChevronRight, Eye, Clock, 
-  Monitor, ArrowRight, Copy, QrCode, RotateCcw, Palette, Upload,
+  Monitor, Copy, QrCode, RotateCcw, Palette, Upload,
   Sparkles, Volume2, Bell, CheckCircle2, Image as ImageIcon, Trash2, AlertTriangle,
-  HardDrive, Database, Send as SendIcon, CheckSquare, RefreshCw, MessageSquare,
-  Laptop, Tablet, Globe, Sliders, VolumeX, BellOff, Info, Plus
+  HardDrive, Database, RefreshCw, MessageSquare,
+  Laptop, Tablet, Sliders, VolumeX, BellOff
 } from 'lucide-react';
 
 import { compressImage } from '../services/imageUtils';
@@ -15,7 +15,7 @@ import { authApi } from '../services/auth';
 import { applyAppearancePreferences, PREFERENCE_KEYS, readBooleanPreference, readPreference, writePreference } from '../services/appPreferences';
 import { 
   subscribeUserSessions, updateSessionNotifications, terminateSession, terminateOtherSessions, 
-  addDemoSession, getCurrentSessionId, detectDeviceInfo 
+  detectDeviceInfo
 } from '../services/sessionService';
 
 interface SettingsModalProps {
@@ -26,7 +26,7 @@ interface SettingsModalProps {
 }
 
 const SettingsModal: React.FC<SettingsModalProps> = ({ user, onClose, onUpdateUser, onDeleteAccount }) => {
-  const [tab, setTab] = useState<'security' | 'sessions' | 'appearance' | 'notifications' | 'storage' | 'chats'>('sessions');
+  const [tab, setTab] = useState<'security' | 'sessions' | 'appearance' | 'notifications' | 'storage' | 'chats'>('security');
   const [showPrivacyGuide, setShowPrivacyGuide] = useState(false);
   
   // Sessions & Devices State
@@ -84,10 +84,12 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ user, onClose, onUpdateUs
     const ua = navigator.userAgent;
     let b = 'مرورگر وب';
     let o = 'سیستم‌عامل';
-    if (ua.includes('Chrome')) b = 'گوگل کروم';
-    else if (ua.includes('Safari')) b = 'سافاری';
+    if (ua.includes('SamsungBrowser')) b = 'سامسونگ اینترنت';
+    else if (ua.includes('Edg')) b = 'مایکروسافت اج';
+    else if (ua.includes('OPR') || ua.includes('Opera')) b = 'اوپرا';
     else if (ua.includes('Firefox')) b = 'فایرفاکس';
-    else if (ua.includes('Edge')) b = 'مایکروسافت اج';
+    else if (ua.includes('Chrome')) b = 'گوگل کروم';
+    else if (ua.includes('Safari')) b = 'سافاری';
 
     if (ua.includes('Windows')) o = 'ویندوز';
     else if (ua.includes('Android')) o = 'اندروید';
@@ -148,7 +150,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ user, onClose, onUpdateUs
       setTimeout(() => setSessionsToast(null), 3000);
     } catch (e) {
       console.error(e);
-      alert('خطا در خاتمه نشست‌ها');
+      setSessionsToast(e instanceof Error ? e.message : 'خاتمه نشست‌ها ناموفق بود.');
     } finally {
       setIsTerminatingOthers(false);
     }
@@ -162,16 +164,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ user, onClose, onUpdateUs
       setTimeout(() => setSessionsToast(null), 2500);
     } catch (e) {
       console.error(e);
-    }
-  };
-
-  const handleAddDemo = async (preset: 'iphone' | 'android' | 'macos') => {
-    try {
-      await addDemoSession(user.id, preset);
-      setSessionsToast('نشست تستی جدید اضافه شد. اکنون می‌توانید اعلان‌های آن را شخصی‌سازی کنید.');
-      setTimeout(() => setSessionsToast(null), 3000);
-    } catch (e) {
-      console.error(e);
+      setSessionsToast(e instanceof Error ? e.message : 'بستن این نشست ناموفق بود.');
     }
   };
 
@@ -243,10 +236,6 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ user, onClose, onUpdateUs
     } catch (e) {
       console.warn('Clear cache error:', e);
     }
-  };
-
-  const handleTestSound = () => {
-    playNotificationSound();
   };
 
   const handleToggleSound = (enabled: boolean) => {
@@ -541,7 +530,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ user, onClose, onUpdateUs
               {tab === 'storage' && <HardDrive size={18}/>}
               {tab === 'chats' && <MessageSquare size={18}/>}
             </span>
-            <h3 className="font-bold text-white text-base">تنظیمات پیام‌رسان</h3>
+            <h3 className="font-bold text-white text-base">{tab === 'sessions' ? 'نشست‌ها و دستگاه‌ها' : 'تنظیمات پیام‌رسان'}</h3>
           </div>
           <button onClick={onClose} className="p-1.5 rounded-full hover:bg-white/5 text-[#708499] hover:text-white transition-colors">
             <X size={20} />
@@ -551,7 +540,6 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ user, onClose, onUpdateUs
         {/* Navigation Tabs (Profile tab completely removed; dedicate to real settings) */}
         <div className="flex border-b border-white/5 bg-[#17212b] px-2 overflow-x-auto no-scrollbar">
           {[
-            { id: 'sessions', label: 'دستگاه‌ها و نشست‌ها', icon: <Laptop size={15}/> },
             { id: 'security', label: 'حریم خصوصی و امنیت', icon: <ShieldCheck size={15}/> },
             { id: 'appearance', label: 'ظاهر و گفتگوها', icon: <Palette size={15}/> },
             { id: 'notifications', label: 'اعلان‌ها و صداها', icon: <Bell size={15}/> },
@@ -580,6 +568,15 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ user, onClose, onUpdateUs
           {/* 0. Sessions & Devices Tab */}
           {tab === 'sessions' && (
             <div className="space-y-6 animate-in slide-in-from-left duration-200">
+              <button
+                type="button"
+                onClick={() => setTab('security')}
+                className="inline-flex items-center gap-1 text-xs font-bold text-[#3390ec] transition-colors hover:text-white"
+              >
+                <ChevronRight size={16}/>
+                بازگشت به حریم خصوصی و امنیت
+              </button>
+
               {/* Toast alert */}
               {sessionsToast && (
                 <div className="p-3 bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 rounded-xl text-xs font-bold flex items-center gap-2 animate-in fade-in">
@@ -612,13 +609,13 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ user, onClose, onUpdateUs
                           <span>{currentSession?.deviceName || 'این دستگاه'}</span>
                         </h5>
                         <p className="text-xs text-[#708499] mt-0.5">
-                          {currentSession?.browser} • {currentSession?.os} • {currentSession?.ipAddress || 'شبکه محلی'}
+                          {currentSession?.browser || sessionInfo.browser} • {currentSession?.os || sessionInfo.os}
                         </p>
                       </div>
                     </div>
                   </div>
 
-                  {/* Per-Session Notification Settings for Current Device */}
+                  {/* Notification settings for this device */}
                   <div className="space-y-3">
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-bold text-white flex items-center gap-2">
@@ -661,14 +658,6 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ user, onClose, onUpdateUs
                           <span className="text-xs text-white font-medium block">صدای زنگ و هشدار پیام</span>
                           <span className="text-[11px] text-[#708499]">پخش ملودی هنگام دریافت پیام جدید</span>
                         </div>
-                        <button
-                          onClick={handleTestSound}
-                          className="px-2 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-[#3390ec] text-[11px] font-bold flex items-center gap-1 transition-colors"
-                          title="تست صدا"
-                        >
-                          <Volume2 size={12}/>
-                          تست
-                        </button>
                       </div>
                       <button
                         onClick={() => handleToggleCurrentNotif('sound', currentSession?.notifications?.sound === false)}
@@ -738,23 +727,6 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ user, onClose, onUpdateUs
                     <Smartphone size={14} />
                     <span>سایر نشست‌های فعال ({otherSessions.length})</span>
                   </h4>
-                  <div className="flex items-center gap-1">
-                    <span className="text-[10px] text-[#708499]">تست چنددستگاهی:</span>
-                    <button
-                      onClick={() => handleAddDemo('iphone')}
-                      className="px-2 py-0.5 rounded-lg bg-white/5 hover:bg-white/10 text-[#3390ec] text-[10px] font-bold"
-                      title="افزودن نشست آیفون تستی"
-                    >
-                      + آیفون
-                    </button>
-                    <button
-                      onClick={() => handleAddDemo('android')}
-                      className="px-2 py-0.5 rounded-lg bg-white/5 hover:bg-white/10 text-[#3390ec] text-[10px] font-bold"
-                      title="افزودن نشست اندروید تستی"
-                    >
-                      + اندروید
-                    </button>
-                  </div>
                 </div>
 
                 {loadingSessions ? (
@@ -796,7 +768,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ user, onClose, onUpdateUs
                             <div className="min-w-0">
                               <h5 className="text-xs font-bold text-white truncate">{sess.deviceName}</h5>
                               <p className="text-[11px] text-[#708499] mt-0.5 truncate">
-                                {sess.browser} • {sess.os} • {sess.ipAddress}
+                                {sess.browser} • {sess.os}
                               </p>
                               <div className="flex items-center gap-2 mt-1">
                                 <span className="text-[10px] text-[#708499] flex items-center gap-1">
@@ -872,28 +844,6 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ user, onClose, onUpdateUs
                </div>
 
                
-               {/* Active Session Card */}
-               <section className="space-y-2">
-                  <h4 className="text-[#3390ec] font-bold text-xs uppercase tracking-widest px-1">نشست‌ها و دستگاه جاری</h4>
-                  <div className="bg-[#242f3d] rounded-2xl overflow-hidden border border-white/5">
-                     <div className="p-4 border-b border-white/5 flex items-center gap-3.5">
-                        <div className="w-10 h-10 bg-[#3390ec]/20 border border-[#3390ec]/30 rounded-xl flex items-center justify-center text-[#3390ec]">
-                          <Smartphone size={20}/>
-                        </div>
-                        <div className="flex-1">
-                           <div className="flex items-center gap-2">
-                             <h5 className="font-bold text-white text-sm">دستگاه فعلی شما</h5>
-                             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"/>
-                           </div>
-                           <p className="text-[11px] text-[#708499] mt-0.5">{sessionInfo.browser} روی {sessionInfo.os} • نشست امن</p>
-                        </div>
-                     </div>
-                     <div className="w-full p-2.5 text-center text-[#708499] text-xs font-medium bg-[#17212b]/60">
-                       سایر دستگاه‌ها یا نشست‌های منقضی شده وجود ندارند.
-                     </div>
-                  </div>
-               </section>
-
                {/* Privacy Controls */}
                <section className="space-y-2">
                   <div className="flex items-center justify-between px-1">
@@ -911,6 +861,12 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ user, onClose, onUpdateUs
                     label="توضیحات جامع حریم خصوصی و امنیت پیام‌رسان" 
                     extra="مشاهده توضیحات" 
                     onClick={() => setShowPrivacyGuide(true)}
+                  />
+                  <SecurityItem
+                    icon={<Laptop size={18}/>}
+                    label="نشست‌ها و دستگاه‌ها"
+                    extra={otherSessions.length ? `${otherSessions.length} دستگاه دیگر` : 'مدیریت نشست‌های فعال'}
+                    onClick={() => setTab('sessions')}
                   />
                   <SecurityItem 
                     icon={<Clock size={18}/>} 
@@ -1170,12 +1126,6 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ user, onClose, onUpdateUs
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
-                      <button
-                        onClick={handleTestSound}
-                        className="px-2.5 py-1 rounded-lg bg-white/5 text-[#708499] hover:text-white text-[11px] font-bold transition-colors"
-                      >
-                        تست صدا ♫
-                      </button>
                       <button
                         onClick={() => handleToggleSound(!soundEnabled)}
                         className={`w-11 h-6 rounded-full transition-colors relative ${
@@ -1570,7 +1520,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ user, onClose, onUpdateUs
 
             <div className="p-3 bg-[#242f3d] rounded-xl border border-white/5 space-y-1">
               <span className="text-xs font-bold text-white block truncate">{editingSession.deviceName}</span>
-              <span className="text-[11px] text-[#708499] block">{editingSession.browser} • {editingSession.os} • {editingSession.ipAddress}</span>
+              <span className="text-[11px] text-[#708499] block">{editingSession.browser} • {editingSession.os}</span>
             </div>
 
             <div className="space-y-3 pt-1">
@@ -1759,7 +1709,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ user, onClose, onUpdateUs
 };
 
 const SecurityItem = ({icon, label, onClick, extra, isActive}: any) => (
-  <div onClick={onClick} className="flex items-center justify-between p-4 bg-[#242f3d] rounded-2xl cursor-pointer hover:bg-[#2b3949] transition-all border border-white/5 group shadow-sm select-none">
+  <button type="button" onClick={onClick} className="w-full text-right flex items-center justify-between p-4 bg-[#242f3d] rounded-2xl cursor-pointer hover:bg-[#2b3949] transition-all border border-white/5 group shadow-sm select-none">
     <div className="flex items-center gap-3.5">
       <span className={`transition-colors p-2 rounded-xl ${isActive ? 'bg-[#3390ec]/20 text-[#3390ec]' : 'bg-white/5 text-[#708499]'}`}>{icon}</span>
       <span className="text-xs font-bold text-white">{label}</span>
@@ -1768,7 +1718,7 @@ const SecurityItem = ({icon, label, onClick, extra, isActive}: any) => (
       {extra && <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full ${isActive ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-white/5 text-[#708499]'}`}>{extra}</span>}
       <ChevronLeft size={16} className="text-[#708499] group-hover:translate-x-[-3px] transition-transform"/>
     </div>
-  </div>
+  </button>
 );
 
 export default SettingsModal;

@@ -1,5 +1,6 @@
 import { User, UserSession, SessionNotificationSettings } from '../types';
 import { db, doc, setDoc, getDoc, getDocs, collection, deleteDoc, onSnapshot } from './database';
+import { authApi } from './auth';
 
 const CURRENT_SESSION_KEY = 'starly_current_session_id';
 const LOCAL_SESSION_NOTIFS_KEY = 'starly_session_notif_prefs';
@@ -30,16 +31,16 @@ export function detectDeviceInfo(): {
   // Browser detection
   if (ua.includes('SamsungBrowser')) {
     browser = 'سامسونگ اینترنت';
-  } else if (ua.includes('Edg/')) {
+  } else if (ua.includes('Edg')) {
     browser = 'مایکروسافت اج';
-  } else if (ua.includes('Chrome') && !ua.includes('Chromium')) {
-    browser = 'گوگل کروم';
-  } else if (ua.includes('Firefox')) {
-    browser = 'فایرفاکس';
-  } else if (ua.includes('Safari') && !ua.includes('Chrome')) {
-    browser = 'سافاری';
   } else if (ua.includes('OPR') || ua.includes('Opera')) {
     browser = 'اوپرا';
+  } else if (ua.includes('Firefox')) {
+    browser = 'فایرفاکس';
+  } else if (ua.includes('Chrome') && !ua.includes('Chromium')) {
+    browser = 'گوگل کروم';
+  } else if (ua.includes('Safari')) {
+    browser = 'سافاری';
   }
 
   // OS detection
@@ -72,8 +73,6 @@ export function detectDeviceInfo(): {
   const deviceName = `${browser} روی ${os}`;
 
   return { browser, os, deviceType, deviceName };
-}
-
 /**
  * Returns the stable ID for this browser tab / device session
  */
@@ -135,15 +134,24 @@ export async function initOrUpdateCurrentSession(user: User): Promise<UserSessio
     ? { ...DEFAULT_SESSION_NOTIFICATIONS, ...existingSession.notifications }
     : cachedNotifs;
 
+  let authSessionId = existingSession?.authSessionId;
+  try {
+    const result = await authApi.sessions();
+    if (result.ok && result.success && Array.isArray(result.sessions)) {
+      authSessionId = result.sessions.find((session: any) => session.current)?.id || authSessionId;
+    }
+  } catch (err) {
+    console.warn('Could not link the device to its authenticated session:', err);
+  }
+
   const sessionData: UserSession = {
     id: sessionId,
+    ...(authSessionId ? { authSessionId } : {}),
     userId: user.id,
     deviceName: info.deviceName,
     browser: info.browser,
     os: info.os,
     deviceType: info.deviceType,
-    ipAddress: existingSession?.ipAddress || '192.168.1.45',
-    location: existingSession?.location || 'ایران',
     createdAt: existingSession?.createdAt || now,
     lastActiveAt: now,
     notifications
@@ -174,7 +182,16 @@ export function subscribeUserSessions(
 
     snapshot.forEach((d: any) => {
       const data = d.data() as UserSession;
+      if (data && data.userId === userId && data.id?.startsWith('sess_demo_')) {
+        void deleteDoc(doc(db, 'user_sessions', data.id)).catch((err) => {
+          console.warn('Could not remove an old demo session:', err);
+        });
+        return;
+      }
       if (data && data.userId === userId) {
+        const safeData = { ...data } as UserSession & { ipAddress?: string; location?: string };
+        delete safeData.ipAddress;
+        delete safeData.location;
         const isCurrent = data.id === currentId;
         if (isCurrent) {
           currentFound = true;
@@ -183,7 +200,7 @@ export function subscribeUserSessions(
             cacheLocalSessionNotifs(data.notifications);
           }
         }
-        list.push({ ...data, isCurrent });
+        list.push({ ...safeData, isCurrent });
       }
     });
 
@@ -238,6 +255,14 @@ export async function updateSessionNotifications(
  */
 export async function terminateSession(sessionId: string): Promise<void> {
   try {
+    const snapshot = await getDoc(doc(db, 'user_sessions', sessionId));
+    if (snapshot.exists()) {
+      const session = snapshot.data() as UserSession;
+      if (session.authSessionId) {
+        const result = await authApi.revokeSession(session.authSessionId);
+        if (!result.ok || !result.success) throw new Error(result.message || 'Could not revoke the authenticated session.');
+      }
+    }
     await deleteDoc(doc(db, 'user_sessions', sessionId));
   } catch (err) {
     console.error('Failed to terminate session:', err);
@@ -251,6 +276,10 @@ export async function terminateSession(sessionId: string): Promise<void> {
 export async function terminateOtherSessions(userId: string): Promise<number> {
   const currentId = getCurrentSessionId();
   try {
+    const revokeResult = await authApi.revokeOtherSessions();
+    if (!revokeResult.ok || !revokeResult.success) {
+      throw new Error(revokeResult.message || 'Could not revoke other authenticated sessions.');
+    }
     const snap = await getDocs(collection(db, 'user_sessions'));
     let terminatedCount = 0;
     const promises: Promise<any>[] = [];
@@ -269,50 +298,4 @@ export async function terminateOtherSessions(userId: string): Promise<number> {
     console.error('Failed to terminate other sessions:', err);
     throw err;
   }
-}
-
-/**
- * Adds a demo simulated session for testing multi-device notifications
- */
-export async function addDemoSession(userId: string, preset: 'iphone' | 'android' | 'macos'): Promise<void> {
-  const id = `sess_demo_${preset}_${Date.now()}`;
-  let deviceName = 'Safari روی iPhone 15 Pro';
-  let browser = 'سافاری';
-  let os = 'iOS (آیفون)';
-  let deviceType: 'mobile' | 'desktop' | 'tablet' = 'mobile';
-  let notifications: SessionNotificationSettings = {
-    enabled: true,
-    previewText: false, // Default private for phone
-    sound: false        // Vibrate only
-  };
-
-  if (preset === 'android') {
-    deviceName = 'کروم روی Samsung Galaxy S24';
-    browser = 'گوگل کروم';
-    os = 'اندروید';
-    deviceType = 'mobile';
-    notifications = { enabled: false, previewText: false, sound: false };
-  } else if (preset === 'macos') {
-    deviceName = 'کروم روی MacBook Pro M3';
-    browser = 'گوگل کروم';
-    os = 'macOS';
-    deviceType = 'desktop';
-    notifications = { enabled: true, previewText: true, sound: true };
-  }
-
-  const session: UserSession = {
-    id,
-    userId,
-    deviceName,
-    browser,
-    os,
-    deviceType,
-    ipAddress: '178.252.189.12',
-    location: 'تهران، ایران',
-    createdAt: Date.now() - 3600000 * 4,
-    lastActiveAt: Date.now() - 1000 * 60 * 12,
-    notifications
-  };
-
-  await setDoc(doc(db, 'user_sessions', id), session);
 }

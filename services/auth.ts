@@ -38,6 +38,9 @@ export const authApi = {
     return r;
   },
   me: () => call('/api/auth/me'),
+  sessions: () => call('/api/auth/sessions'),
+  revokeSession: (id: string) => call(`/api/auth/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  revokeOtherSessions: () => call('/api/auth/sessions/revoke-others', { method: 'POST' }),
   heartbeat: () => call('/api/users/heartbeat', { method: 'POST' }),
   logout: async () => { await call('/api/auth/logout', { method: 'POST' }); setToken(null); },
   deleteAccount: async () => { const r = await call('/api/auth/delete-account', { method: 'POST' }); setToken(null); return r; }

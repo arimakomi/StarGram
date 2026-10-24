@@ -140,8 +140,8 @@ class LocalAdapter {
     return rows;
   }
 
-  async createSession(tokenHash, userId, now, expiresAt) {
-    this.sessions.set(tokenHash, { token_hash: tokenHash, user_id: userId, created_at: now, expires_at: expiresAt });
+  async createSession(tokenHash, userId, now, expiresAt, userAgent = '') {
+    this.sessions.set(tokenHash, { token_hash: tokenHash, user_id: userId, created_at: now, expires_at: expiresAt, user_agent: userAgent });
     this.save();
   }
 
@@ -154,6 +154,32 @@ class LocalAdapter {
   async deleteSession(tokenHash) {
     this.sessions.delete(tokenHash);
     this.save();
+  }
+
+  async listUserSessions(userId, now) {
+    return Array.from(this.sessions.values())
+      .filter((session) => session.user_id === userId && session.expires_at > now)
+      .sort((a, b) => b.created_at - a.created_at);
+  }
+
+  async deleteUserSession(tokenHash, userId) {
+    const session = this.sessions.get(tokenHash);
+    if (!session || session.user_id !== userId) return false;
+    this.sessions.delete(tokenHash);
+    this.save();
+    return true;
+  }
+
+  async deleteOtherUserSessions(userId, currentTokenHash) {
+    let deleted = 0;
+    for (const [tokenHash, session] of this.sessions.entries()) {
+      if (session.user_id === userId && tokenHash !== currentTokenHash) {
+        this.sessions.delete(tokenHash);
+        deleted++;
+      }
+    }
+    if (deleted) this.save();
+    return deleted;
   }
 
   async cleanExpiredSessions(now) {
@@ -199,10 +225,13 @@ class PostgresAdapter {
         token_hash VARCHAR(64) NOT NULL PRIMARY KEY,
         user_id VARCHAR(191) NOT NULL,
         created_at BIGINT NOT NULL,
-        expires_at BIGINT NOT NULL
+        expires_at BIGINT NOT NULL,
+        user_agent TEXT
       );
       CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions (user_id);
     `);
+    try { await this.pool.query('ALTER TABLE sessions ADD COLUMN user_agent TEXT'); }
+    catch (error) { if (error.code !== '42701') throw error; }
   }
 
   async getDoc(col, id) {
@@ -242,10 +271,10 @@ class PostgresAdapter {
     return res.rows;
   }
 
-  async createSession(tokenHash, userId, now, expiresAt) {
+  async createSession(tokenHash, userId, now, expiresAt, userAgent = '') {
     await this.pool.query(
-      'INSERT INTO sessions (token_hash, user_id, created_at, expires_at) VALUES ($1, $2, $3, $4)',
-      [tokenHash, userId, now, expiresAt]
+      'INSERT INTO sessions (token_hash, user_id, created_at, expires_at, user_agent) VALUES ($1, $2, $3, $4, $5)',
+      [tokenHash, userId, now, expiresAt, userAgent]
     );
   }
 
@@ -261,6 +290,24 @@ class PostgresAdapter {
 
   async deleteSession(tokenHash) {
     await this.pool.query('DELETE FROM sessions WHERE token_hash = $1', [tokenHash]);
+  }
+
+  async listUserSessions(userId, now) {
+    const res = await this.pool.query(
+      'SELECT token_hash, user_id, created_at, expires_at, user_agent FROM sessions WHERE user_id = $1 AND expires_at > $2 ORDER BY created_at DESC',
+      [userId, now]
+    );
+    return res.rows;
+  }
+
+  async deleteUserSession(tokenHash, userId) {
+    const res = await this.pool.query('DELETE FROM sessions WHERE token_hash = $1 AND user_id = $2', [tokenHash, userId]);
+    return res.rowCount > 0;
+  }
+
+  async deleteOtherUserSessions(userId, currentTokenHash) {
+    const res = await this.pool.query('DELETE FROM sessions WHERE user_id = $1 AND token_hash <> $2', [userId, currentTokenHash]);
+    return res.rowCount;
   }
 
   async cleanExpiredSessions(now) {
@@ -303,8 +350,11 @@ class MysqlAdapter {
       user_id VARCHAR(191) NOT NULL,
       created_at BIGINT NOT NULL,
       expires_at BIGINT NOT NULL,
+      user_agent TEXT,
       KEY idx_user (user_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin`);
+    try { await this.pool.query('ALTER TABLE sessions ADD COLUMN user_agent TEXT'); }
+    catch (error) { if (error.code !== 'ER_DUP_FIELDNAME' && error.errno !== 1060) throw error; }
   }
 
   async getDoc(col, id) {
@@ -340,10 +390,10 @@ class MysqlAdapter {
     return rows;
   }
 
-  async createSession(tokenHash, userId, now, expiresAt) {
+  async createSession(tokenHash, userId, now, expiresAt, userAgent = '') {
     await this.pool.query(
-      'INSERT INTO sessions (token_hash, user_id, created_at, expires_at) VALUES (?,?,?,?)',
-      [tokenHash, userId, now, expiresAt]
+      'INSERT INTO sessions (token_hash, user_id, created_at, expires_at, user_agent) VALUES (?,?,?,?,?)',
+      [tokenHash, userId, now, expiresAt, userAgent]
     );
   }
 
@@ -359,6 +409,24 @@ class MysqlAdapter {
 
   async deleteSession(tokenHash) {
     await this.pool.query('DELETE FROM sessions WHERE token_hash=?', [tokenHash]);
+  }
+
+  async listUserSessions(userId, now) {
+    const [rows] = await this.pool.query(
+      'SELECT token_hash, user_id, created_at, expires_at, user_agent FROM sessions WHERE user_id=? AND expires_at>? ORDER BY created_at DESC',
+      [userId, now]
+    );
+    return rows;
+  }
+
+  async deleteUserSession(tokenHash, userId) {
+    const [result] = await this.pool.query('DELETE FROM sessions WHERE token_hash=? AND user_id=?', [tokenHash, userId]);
+    return result.affectedRows > 0;
+  }
+
+  async deleteOtherUserSessions(userId, currentTokenHash) {
+    const [result] = await this.pool.query('DELETE FROM sessions WHERE user_id=? AND token_hash<>?', [userId, currentTokenHash]);
+    return result.affectedRows;
   }
 
   async cleanExpiredSessions(now) {
@@ -501,6 +569,11 @@ app.set('trust proxy', 'loopback');
 app.use(express.json({ limit: '50mb' }));
 
 const syncStreamsByUser = new Map();
+function closeUserSyncStreams(userId) {
+  const streams = syncStreamsByUser.get(userId);
+  if (!streams) return;
+  for (const stream of streams) stream.end();
+}
 
 function writeSyncEvent(res, payload) {
   if (res.writableEnded || res.destroyed) return;
@@ -550,10 +623,10 @@ app.get('/api/health', wrap(async (req, res) => {
   });
 }));
 
-async function createSession(userId) {
+async function createSession(userId, userAgent = '') {
   const token = crypto.randomBytes(32).toString('hex');
   const now = Date.now();
-  await dbAdapter.createSession(sha256(token), userId, now, now + SESSION_TTL);
+  await dbAdapter.createSession(sha256(token), userId, now, now + SESSION_TTL, String(userAgent).slice(0, 512));
   if (Math.random() < 0.05) dbAdapter.cleanExpiredSessions(now).catch(() => {});
   return token;
 }
@@ -582,7 +655,7 @@ app.post('/api/auth/register', wrap(async (req, res) => {
     theme: 'night', wallpaper: 'default', contacts: [], privacy: { showStatus: 'all', showAvatar: 'all' }
   };
   await dbAdapter.putDoc('users', username, user, now);
-  res.json({ success: true, token: await createSession(username), user: publicUser(user) });
+  res.json({ success: true, token: await createSession(username, req.get('user-agent')), user: publicUser(user) });
 }));
 
 app.post('/api/auth/login', wrap(async (req, res) => {
@@ -607,7 +680,7 @@ app.post('/api/auth/login', wrap(async (req, res) => {
   user.status = 'online';
   await dbAdapter.putDoc('users', username, user, now);
   attempts.delete(key);
-  res.json({ success: true, token: await createSession(username), user: publicUser(user) });
+  res.json({ success: true, token: await createSession(username, req.get('user-agent')), user: publicUser(user) });
 }));
 
 // ───────────── احراز هویت توکن‌های API و نشست‌های کاربران ─────────────
@@ -667,6 +740,49 @@ async function auth(req, res, next) {
 }
 
 app.get('/api/auth/me', auth, (req, res) => res.json({ success: true, user: publicUser(req.user) }));
+
+app.get('/api/auth/sessions', auth, wrap(async (req, res) => {
+  if (req.isApiToken || !req.tokenHash) {
+    return res.status(403).json({ success: false, message: 'مدیریت نشست‌ها فقط با ورود حساب کاربری در دسترس است.' });
+  }
+  const sessions = await dbAdapter.listUserSessions(req.user.id, Date.now());
+  res.json({
+    success: true,
+    sessions: sessions.map((session) => ({
+      id: session.token_hash,
+      createdAt: Number(session.created_at),
+      expiresAt: Number(session.expires_at),
+      userAgent: String(session.user_agent || '').slice(0, 512),
+      current: session.token_hash === req.tokenHash
+    }))
+  });
+}));
+
+app.delete('/api/auth/sessions/:id', auth, wrap(async (req, res) => {
+  if (req.isApiToken || !req.tokenHash) {
+    return res.status(403).json({ success: false, message: 'مدیریت نشست‌ها فقط با ورود حساب کاربری در دسترس است.' });
+  }
+  const sessionId = String(req.params.id || '');
+  if (!/^[a-f0-9]{64}$/i.test(sessionId)) {
+    return res.status(400).json({ success: false, message: 'شناسه نشست نامعتبر است.' });
+  }
+  if (sessionId === req.tokenHash) {
+    return res.status(400).json({ success: false, message: 'برای خروج از دستگاه جاری از گزینه خروج استفاده کنید.' });
+  }
+  const revoked = await dbAdapter.deleteUserSession(sessionId, req.user.id);
+  if (!revoked) return res.status(404).json({ success: false, message: 'نشست پیدا نشد یا قبلاً بسته شده است.' });
+  closeUserSyncStreams(req.user.id);
+  res.json({ success: true });
+}));
+
+app.post('/api/auth/sessions/revoke-others', auth, wrap(async (req, res) => {
+  if (req.isApiToken || !req.tokenHash) {
+    return res.status(403).json({ success: false, message: 'مدیریت نشست‌ها فقط با ورود حساب کاربری در دسترس است.' });
+  }
+  const revokedCount = await dbAdapter.deleteOtherUserSessions(req.user.id, req.tokenHash);
+  closeUserSyncStreams(req.user.id);
+  res.json({ success: true, revokedCount });
+}));
 
 app.get('/api/sync/events', auth, (req, res) => {
   const userId = req.user.id;
@@ -748,6 +864,7 @@ app.get('/api/db/:collection', auth, wrap(async (req, res) => {
     if (r.deleted) { deleted.push(r.doc_id); continue; }
     const d = typeof r.data === 'string' ? JSON.parse(r.data) : r.data;
     if (c === 'chats' && !(Array.isArray(d.participantIds) && d.participantIds.includes(req.user.id))) continue;
+    if (c === 'user_sessions' && !admin && d.userId !== req.user.id) continue;
     if (c === 'reports' && !admin) continue;
     docs[r.doc_id] = c === 'users' ? publicUser(d) : d;
   }
@@ -767,6 +884,10 @@ app.post('/api/db/:collection/batch', auth, wrap(async (req, res) => {
     if (id.length > 191 || !incoming || typeof incoming !== 'object') continue;
     let data = incoming;
     let previousChat = null;
+    if (c === 'user_sessions' && !admin) {
+      const existingSession = await dbAdapter.getDoc('user_sessions', id);
+      if (incoming.userId !== req.user.id || (existingSession && existingSession.userId !== req.user.id)) continue;
+    }
     if (c === 'chats') {
       const existingChat = await dbAdapter.getDoc('chats', id);
       previousChat = existingChat;
@@ -800,6 +921,10 @@ app.post('/api/db/:collection/batch', auth, wrap(async (req, res) => {
     if (typeof id !== 'string') continue;
     if (c === 'users' && !admin && id !== req.user.id) continue;
     if (c === 'users' && id === req.user.id && admin) continue;
+    if (c === 'user_sessions' && !admin) {
+      const existingSession = await dbAdapter.getDoc('user_sessions', id);
+      if (existingSession && existingSession.userId !== req.user.id) continue;
+    }
     if (c === 'chats') {
       const cur = await dbAdapter.getDoc('chats', id);
       if (!cur || !(Array.isArray(cur.participantIds) && cur.participantIds.includes(req.user.id))) continue;
@@ -1402,7 +1527,7 @@ app.post('/api/v1/auth/login', wrap(async (req, res) => {
   if (!user || !verifyPassword(password, user.passwordHash)) {
     return res.status(401).json({ success: false, message: 'نام کاربری یا رمز عبور نامعتبر است.' });
   }
-  const token = await createSession(username);
+  const token = await createSession(username, req.get('user-agent'));
   res.json({ success: true, token, user: publicUser(user) });
 }));
 
@@ -1421,7 +1546,7 @@ app.post('/api/v1/auth/register', wrap(async (req, res) => {
     contacts: [], privacy: { showStatus: 'all', showAvatar: 'all' }, theme: 'night', wallpaper: 'default'
   };
   await dbAdapter.putDoc('users', username, user, now);
-  const token = await createSession(username);
+  const token = await createSession(username, req.get('user-agent'));
   res.status(201).json({ success: true, token, user: publicUser(user) });
 }));
 
@@ -1501,6 +1626,11 @@ app.delete('/api/v1/sessions/:id', auth, wrap(async (req, res) => {
     return res.status(403).json({ success: false, message: 'اجازه خاتمه دادن به این نشست را ندارید.' });
   }
 
+  if (session.authSessionId) {
+    await dbAdapter.deleteUserSession(session.authSessionId, session.userId);
+    closeUserSyncStreams(session.userId);
+  }
+
   const now = Date.now();
   await dbAdapter.deleteDoc('user_sessions', id, now);
   res.json({ success: true, message: `نشست «${session.deviceName || id}» با موفقیت خاتمه یافت.` });
@@ -1508,7 +1638,9 @@ app.delete('/api/v1/sessions/:id', auth, wrap(async (req, res) => {
 
 // خاتمه دادن به همه نشست‌های دیگر کاربر جاری به جز یک نشست مشخص
 app.post('/api/v1/sessions/terminate-others', auth, wrap(async (req, res) => {
-  const currentSessionId = req.body?.currentSessionId || req.headers['x-session-id'];
+  if (req.isApiToken || !req.tokenHash) {
+    return res.status(403).json({ success: false, message: 'این عملیات فقط با نشست ورود حساب کاربری در دسترس است.' });
+  }
   const targetUserId = req.user.id;
   const rows = await dbAdapter.getCollectionDocs('user_sessions');
   const now = Date.now();
@@ -1518,10 +1650,14 @@ app.post('/api/v1/sessions/terminate-others', auth, wrap(async (req, res) => {
     if (r.deleted) continue;
     const s = typeof r.data === 'string' ? JSON.parse(r.data) : r.data;
     if (!s || s.userId !== targetUserId) continue;
-    if (currentSessionId && s.id === currentSessionId) continue;
+    if (s.authSessionId === req.tokenHash) continue;
+    if (s.authSessionId) await dbAdapter.deleteUserSession(s.authSessionId, s.userId);
     await dbAdapter.deleteDoc('user_sessions', s.id, now);
     terminatedCount++;
   }
+
+  await dbAdapter.deleteOtherUserSessions(targetUserId, req.tokenHash);
+  closeUserSyncStreams(targetUserId);
 
   res.json({
     success: true,
