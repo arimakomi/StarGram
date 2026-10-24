@@ -26,8 +26,8 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="StarChat">
-  <link rel="icon" type="image/svg+xml" href="/icon.svg">
-  <link rel="apple-touch-icon" href="/icon-192.png">
+  <link rel="icon" type="image/png" href="/assets/aistudio/Redesign_messaging_app_logo_2K_20261024155118-removebg-preview_b2ab75e4.png">
+  <link rel="apple-touch-icon" href="/assets/aistudio/Redesign_messaging_app_logo_2K_20261024155118-removebg-preview_b2ab75e4.png">
 
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
@@ -53,24 +53,27 @@
       user-select: none;
     }
 
-    /* Themes */
+    /* Classic Telegram Light (Day Theme) */
     .day-theme { 
-      --tg-bg: #8ec09a; 
+      --tg-bg: #e4ecf2; 
       --tg-secondary: #ffffff; 
+      --tg-accent: #3390ec;
       --tg-text: #111827;
       --tg-text-secondary: #64748b;
       --tg-input: #f1f5f9;
+      background-color: #e4ecf2 !important;
+      color: #111827 !important;
     }
 
-    /* Base Surfaces */
+    /* 1. Base Surfaces */
     .day-theme [class*="bg-[#0e1621]"] {
       background-color: #e4ecf2 !important;
     }
-    .day-theme [class*="bg-[#17212b]"] {
+    .day-theme [class*="bg-[#17212b]"]:not([class*="bg-[#3390ec]"]) {
       background-color: #ffffff !important;
     }
-    .day-theme [class*="bg-[#242f3d]"] {
-      background-color: #f8fafc !important;
+    .day-theme [class*="bg-[#242f3d]"]:not([class*="bg-[#3390ec]"]) {
+      background-color: #f1f5f9 !important;
     }
     .day-theme [class*="bg-[#1e2c3a]"],
     .day-theme [class*="bg-[#2b3949]"],
@@ -78,7 +81,7 @@
     .day-theme [class*="bg-[#1e2a38]"],
     .day-theme [class*="bg-[#1c2733]"],
     .day-theme [class*="bg-[#1b2531]"] {
-      background-color: #f1f5f9 !important;
+      background-color: #f8fafc !important;
     }
 
     /* Subdued cards and hover backgrounds */
@@ -94,16 +97,27 @@
     .day-theme [class*="hover:bg-white/10"]:hover {
       background-color: rgba(15, 23, 42, 0.09) !important;
     }
+    .day-theme [class*="hover:bg-[#242f3d]"]:hover {
+      background-color: #f1f5f9 !important;
+    }
 
-    /* General text contrast */
-    .day-theme [class*="text-white"] {
+    /* 2. Text Legibility - Non-destructive */
+    .day-theme p,
+    .day-theme span,
+    .day-theme h1,
+    .day-theme h2,
+    .day-theme h3,
+    .day-theme h4 {
+      color: inherit;
+    }
+    .day-theme .text-white:not([class*="bg-[#3390ec]"] *):not([class*="bg-red-"] *):not([class*="bg-green-"] *):not([class*="bg-emerald-"] *):not([class*="bg-blue-"] *):not([class*="bg-[#2881d9]"] *) {
       color: #111827 !important;
     }
     .day-theme [class*="text-[#708499]"] {
       color: #64748b !important;
     }
 
-    /* CRITICAL: Keep crisp white text on colored accent buttons & badges! */
+    /* 3. CRITICAL: Crisp Pure White Text on Accent Buttons and Active Chat Rows! */
     .day-theme [class*="bg-[#3390ec]"],
     .day-theme [class*="bg-[#3390ec]"] *,
     .day-theme [class*="bg-[#2881d9]"],
@@ -116,8 +130,15 @@
       color: #ffffff !important;
     }
 
-    /* Telegram Light Message Bubbles */
-    /* 1. Sent messages: Classic Telegram soft green */
+    /* Unread badge inside active chat row */
+    .day-theme [class*="bg-[#3390ec]"] .bg-white,
+    .day-theme [class*="bg-[#3390ec]"] .bg-white * {
+      background-color: #ffffff !important;
+      color: #3390ec !important;
+    }
+
+    /* 4. Telegram Light Message Bubbles */
+    /* Sent messages: Classic Telegram soft green */
     .day-theme .message-bubble.bubble-sent,
     .day-theme .message-bubble[class*="bg-[#2b5278]"] {
       background-color: #eeffde !important;
@@ -129,7 +150,6 @@
     .day-theme .message-bubble[class*="bg-[#2b5278]"] * {
       color: #111827 !important;
     }
-    /* Sent bubble time & checkmark in emerald */
     .day-theme .message-bubble.bubble-sent .bubble-meta,
     .day-theme .message-bubble[class*="bg-[#2b5278]"] .bubble-meta,
     .day-theme .message-bubble.bubble-sent .bubble-meta *,
@@ -140,7 +160,7 @@
       color: #eeffde !important;
     }
 
-    /* 2. Received messages: Pure crisp white */
+    /* Received messages: Pure crisp white */
     .day-theme .message-bubble.bubble-received,
     .day-theme .message-bubble[class*="bg-[#182533]"] {
       background-color: #ffffff !important;
@@ -161,7 +181,14 @@
       color: #ffffff !important;
     }
 
-    /* Borders */
+    /* 5. Chat Wallpaper in Day Theme */
+    .day-theme .chat-wallpaper {
+      background-color: #e4ecf2 !important;
+      background-image: radial-gradient(circle at 25px 25px, rgba(0, 0, 0, 0.04) 2%, transparent 0%), radial-gradient(circle at 75px 75px, rgba(0, 0, 0, 0.04) 2%, transparent 0%) !important;
+      background-size: 100px 100px !important;
+    }
+
+    /* 6. Borders */
     .day-theme [class*="border-white/5"],
     .day-theme [class*="border-white/10"],
     .day-theme [class*="border-white/20"],
@@ -172,7 +199,7 @@
       border-color: #e2e8f0 !important;
     }
 
-    /* Inputs & Textareas */
+    /* 7. Inputs & Textareas */
     .day-theme input,
     .day-theme textarea {
       background-color: #f1f5f9 !important;
@@ -184,11 +211,12 @@
       color: #94a3b8 !important;
     }
 
-    /* Modals & Backdrops */
+    /* 8. Modals & Backdrops */
     .day-theme .fixed.inset-0[class*="bg-black/80"],
     .day-theme .fixed.inset-0[class*="bg-black/60"],
-    .day-theme .fixed.inset-0[class*="bg-black/50"] {
-      background-color: rgba(15, 23, 42, 0.5) !important;
+    .day-theme .fixed.inset-0[class*="bg-black/50"],
+    .day-theme .fixed.inset-0[class*="bg-black/40"] {
+      background-color: rgba(15, 23, 42, 0.45) !important;
     }
 
     /* Scrollbars in Day Theme */

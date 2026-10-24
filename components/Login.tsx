@@ -4,6 +4,7 @@ import { authApi } from '../services/auth';
 import { User, DEFAULT_AVATAR } from '../types';
 
 import { generateLocalAvatarSvg } from '../services/avatarGenerator';
+import { StarChatLogo } from './StarChatLogo';
 
 interface LoginProps {
   onLogin: (userData: User) => void | Promise<void>;
@@ -73,13 +74,18 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
 
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-[#0e1621] p-6 text-white overflow-hidden font-['Vazirmatn']" dir="rtl">
-      <div className="w-full max-w-sm space-y-8 animate-in">
-        <div className="text-center">
-          <div className="w-20 h-20 bg-[#3390ec] rounded-[28px] mx-auto mb-6 flex items-center justify-center shadow-2xl rotate-3 transform hover:rotate-0 transition-transform">
-            <Send size={40} className="text-white -translate-x-1" />
+      <div className="w-full max-w-sm space-y-7 animate-in">
+        <div className="text-center flex flex-col items-center">
+          <div className="relative mb-2 group cursor-pointer w-full flex items-center justify-center">
+            <div className="absolute -inset-6 bg-gradient-to-r from-red-500/20 via-[#3390ec]/25 to-blue-600/20 rounded-full blur-2xl opacity-60 group-hover:opacity-100 transition-opacity pointer-events-none" />
+            <StarChatLogo 
+              variant="full" 
+              height={180} 
+              className="relative max-w-full transform hover:scale-105 transition-transform drop-shadow-xl" 
+            />
           </div>
-          <h1 className="text-3xl font-bold tracking-tight mb-2">استارلی چت</h1>
-          <p className="text-[#708499] text-sm">پیام‌رسان آنلاین (Cloud Based)</p>
+          <h1 className="text-2xl font-black tracking-tight mb-1 text-white">استارلی چت</h1>
+          <p className="text-[#708499] text-xs">پیام‌رسان ابری، امن و پرسرعت</p>
         </div>
 
         <div className="bg-[#17212b] p-8 rounded-3xl border border-white/5 shadow-2xl relative">

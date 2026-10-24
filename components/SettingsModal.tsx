@@ -638,7 +638,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ user, onClose, onUpdateUs
                     {[
                       { id: 'night', label: 'شب (تلگرام تاریک)', bg: 'bg-[#0e1621] text-white border-white/10', color: '#17212b' },
                       { id: 'oled', label: 'مشکی مطلق (OLED)', bg: 'bg-[#000000] text-white border-white/20', color: '#121212' },
-                      { id: 'day', label: 'روز (روشن)', bg: 'bg-[#f0f2f5] text-black border-black/10', color: '#ffffff' },
+                      { id: 'day', label: 'کلاسیک روشن (تلگرام)', bg: 'bg-[#e4ecf2] text-black border-slate-300', color: '#e4ecf2' },
                       { id: 'arctic', label: 'آرتیک (زمردی)', bg: 'bg-[#0b141a] text-white border-emerald-500/30', color: '#111b21' },
                     ].map(t => (
                       <button

@@ -1,6 +1,7 @@
 import { generateLocalAvatarSvg } from '../services/avatarGenerator';
 import { GroupEditModal } from './GroupEditModal';
 import { ChannelEditModal } from './ChannelEditModal';
+import { StarChatLogo } from './StarChatLogo';
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Chat, User, Message, Poll, DEFAULT_AVATAR, AdminPermissions } from '../types';
 import { 
@@ -456,23 +457,23 @@ const ChatArea: React.FC<ChatAreaProps> = ({
 
   if (!chat || !chatInfo) {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center bg-[#0e1621] text-[#708499] p-6 relative overflow-hidden select-none">
+      <div className="flex-1 flex flex-col items-center justify-center bg-[#0e1621] text-[#708499] p-6 relative overflow-hidden select-none empty-chat-container">
         {/* Subtle Ambient Radial Glow */}
         <div className="absolute w-[450px] h-[450px] bg-[#3390ec]/10 rounded-full blur-3xl pointer-events-none -top-20 -right-20 animate-pulse" />
-        <div className="absolute w-[350px] h-[350px] bg-emerald-500/5 rounded-full blur-3xl pointer-events-none -bottom-10 -left-10" />
+        <div className="absolute w-[350px] h-[350px] bg-red-500/5 rounded-full blur-3xl pointer-events-none -bottom-10 -left-10" />
 
         <div className="relative z-10 max-w-md w-full flex flex-col items-center text-center space-y-6">
-          {/* Logo Badge with Breathing Room */}
-          <div className="relative group">
-            <div className="absolute -inset-2 bg-gradient-to-tr from-[#3390ec] to-emerald-400 rounded-3xl blur-xl opacity-30 group-hover:opacity-60 transition duration-500" />
-            <div className="relative w-24 h-24 bg-gradient-to-b from-[#1e2a38] to-[#17212b] border border-white/10 rounded-3xl flex items-center justify-center shadow-2xl">
-              <MessageCircle size={44} className="text-[#3390ec]" />
+          {/* Logo Badge with StarChat Symbol */}
+          <div className="relative group cursor-pointer">
+            <div className="absolute -inset-3 bg-gradient-to-tr from-[#3390ec]/30 via-red-500/20 to-blue-600/30 rounded-3xl blur-xl opacity-40 group-hover:opacity-80 transition duration-500" />
+            <div className="relative w-24 h-24 bg-gradient-to-b from-[#1e2a38] to-[#17212b] border border-white/10 rounded-3xl flex items-center justify-center shadow-2xl p-2 empty-chat-card">
+              <StarChatLogo variant="symbol" size={80} />
             </div>
           </div>
 
           {/* Heading with Generous Spacing */}
           <div className="space-y-2">
-            <h2 className="text-2xl font-bold text-white tracking-wide">
+            <h2 className="text-2xl font-black text-white tracking-wide">
               پیام‌رسان استارلی چت
             </h2>
             <p className="text-xs text-[#708499] leading-relaxed">
@@ -482,7 +483,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
 
           {/* Feature Badges with clean spacing */}
           <div className="grid grid-cols-1 gap-2.5 w-full pt-2">
-            <div className="flex items-center gap-3 p-3 bg-[#17212b]/80 border border-white/5 rounded-2xl text-right">
+            <div className="flex items-center gap-3 p-3 bg-[#17212b]/80 border border-white/5 rounded-2xl text-right empty-chat-card">
               <div className="w-8 h-8 rounded-xl bg-emerald-500/10 flex items-center justify-center text-emerald-400 shrink-0">
                 <ShieldCheck size={16} />
               </div>
@@ -492,7 +493,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
               </div>
             </div>
 
-            <div className="flex items-center gap-3 p-3 bg-[#17212b]/80 border border-white/5 rounded-2xl text-right">
+            <div className="flex items-center gap-3 p-3 bg-[#17212b]/80 border border-white/5 rounded-2xl text-right empty-chat-card">
               <div className="w-8 h-8 rounded-xl bg-[#3390ec]/10 flex items-center justify-center text-[#3390ec] shrink-0">
                 <Shield size={16} />
               </div>
@@ -505,7 +506,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
 
           {/* Call to action instruction */}
           <div className="pt-2">
-            <span className="inline-block px-4 py-2 bg-[#242f3d]/70 text-[#3390ec] border border-[#3390ec]/20 rounded-full text-xs font-medium">
+            <span className="inline-block px-4 py-2 bg-[#242f3d]/70 text-[#3390ec] border border-[#3390ec]/20 rounded-full text-xs font-medium shadow-xs">
               یک گفتگو را از فهرست سمت راست برای شروع انتخاب کنید
             </span>
           </div>

@@ -11,6 +11,7 @@ import { collection, query, where, getDocs, db } from '../services/database';
 import { compressImage } from '../services/imageUtils';
 import { StoriesBar } from './StoriesBar';
 import { getUserPresence } from '../services/presenceUtils';
+import { StarChatLogo } from './StarChatLogo';
 
 interface SidebarProps {
   chats: Chat[];
@@ -411,10 +412,10 @@ const Sidebar: React.FC<SidebarProps> = ({
   return (
     <div className="flex flex-col h-full w-full bg-[#17212b] border-l border-black/20 relative select-none">
       {/* Header */}
-      <div className="p-3 flex items-center gap-3 bg-[#17212b] border-b border-white/5 shrink-0">
+      <div className="p-3 flex items-center gap-2.5 bg-[#17212b] border-b border-white/5 shrink-0">
         <button 
           onClick={() => setShowDrawer(true)} 
-          className="p-2 text-[#708499] hover:text-white hover:bg-white/5 rounded-full transition-all active:scale-95"
+          className="p-2 text-[#708499] hover:text-white hover:bg-white/5 rounded-full transition-all active:scale-95 shrink-0"
           title="منوی اصلی"
         >
           <Menu size={22} />
@@ -435,6 +436,13 @@ const Sidebar: React.FC<SidebarProps> = ({
                <X size={16}/>
              </button>
            )}
+        </div>
+        <div 
+          onClick={() => setShowDrawer(true)}
+          className="cursor-pointer hover:opacity-85 transition-opacity shrink-0"
+          title="استارلی چت"
+        >
+          <StarChatLogo variant="symbol" size={32} />
         </div>
       </div>
 
@@ -960,6 +968,14 @@ const Sidebar: React.FC<SidebarProps> = ({
                   <LogOut size={19}/> 
                   <span className="font-medium">خروج از حساب</span>
                 </button>
+
+                <div className="pt-3 pb-1 px-3 flex items-center justify-between text-[11px] text-[#708499] border-t border-white/5 mt-2">
+                  <div className="flex items-center gap-2">
+                    <StarChatLogo variant="symbol" size={20} />
+                    <span className="font-medium">استارلی چت</span>
+                  </div>
+                  <span className="font-mono text-[10px] opacity-70">Cloud Edition</span>
+                </div>
              </div>
           </div>
         </div>

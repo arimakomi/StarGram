@@ -10,6 +10,7 @@ import { StoryViewerModal } from './components/StoryViewerModal';
 import { ReportModal } from './components/ReportModal';
 import { AdminPanelModal } from './components/AdminPanelModal';
 import { generateLocalAvatarSvg } from './services/avatarGenerator';
+import { StarChatLogo } from './components/StarChatLogo';
 import { gemini } from './services/geminiService';
 import { Lock, Send, Bell, Sparkles, BellRing, X } from 'lucide-react';
 import { db, collection, query, where, onSnapshot, doc, updateDoc, setDoc, getDoc, getDocs, deleteDoc, arrayUnion, startSync, stopSync } from './services/database';
@@ -1404,12 +1405,12 @@ const App: React.FC = () => {
 
           {/* Spacious Modern Welcome Card */}
           <div className="relative z-10 max-w-sm w-full p-8 bg-[#17212b]/90 border border-white/10 rounded-3xl backdrop-blur-md shadow-2xl flex flex-col items-center text-center space-y-6">
-            {/* Glowing Logo Icon */}
-            <div className="relative flex items-center justify-center my-2">
-              <div className="absolute w-28 h-28 rounded-full bg-[#3390ec]/20 animate-ping opacity-50" />
-              <div className="absolute w-36 h-36 rounded-full bg-[#3390ec]/10 animate-pulse" />
-              <div className="relative w-24 h-24 bg-gradient-to-tr from-[#2b5278] via-[#3390ec] to-[#5288c1] rounded-3xl flex items-center justify-center shadow-2xl shadow-[#3390ec]/40 transform animate-pop">
-                <Send size={44} className="text-white -translate-x-0.5" />
+            {/* Glowing StarChat Logo */}
+            <div className="relative flex items-center justify-center my-2 group">
+              <div className="absolute w-36 h-36 rounded-full bg-[#3390ec]/20 animate-ping opacity-35" />
+              <div className="absolute w-44 h-44 rounded-full bg-red-500/10 animate-pulse" />
+              <div className="relative p-2.5 rounded-3xl bg-white/5 border border-white/10 backdrop-blur-xs transform animate-pop shadow-2xl">
+                <StarChatLogo variant="full" height={85} className="drop-shadow-lg" />
               </div>
             </div>
 
