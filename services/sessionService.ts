@@ -73,6 +73,8 @@ export function detectDeviceInfo(): {
   const deviceName = `${browser} روی ${os}`;
 
   return { browser, os, deviceType, deviceName };
+}
+
 /**
  * Returns the stable ID for this browser tab / device session
  */
