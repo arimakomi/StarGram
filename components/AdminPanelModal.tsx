@@ -575,57 +575,68 @@ const handleExecutePanic = async () => {
         </div>
 
         {/* Navigation Tabs */}
-        <div className="flex items-center gap-2 px-6 py-3 border-b border-[#242f3d] bg-[#121b24] overflow-x-auto no-scrollbar">
-          <button
-            onClick={() => setActiveTab('system')}
-            className={`px-4 py-2 text-xs font-semibold rounded-xl transition-colors flex items-center gap-2 shrink-0 ${
-              activeTab === 'system' ? 'bg-[#5288c1] text-white shadow-xs' : 'text-gray-400 hover:text-white hover:bg-[#242f3d]'
-            }`}
+        <div className="border-b border-[#242f3d] bg-[#121b24]">
+          <p className="px-5 pt-2 text-[10px] text-gray-500">
+            برای دیدن همه بخش‌ها، نوار منو را افقی پیمایش کنید.
+          </p>
+          <div
+            role="group"
+            aria-label="بخش‌های پنل مدیریت"
+            tabIndex={0}
+            className="flex w-full flex-nowrap items-center gap-2 overflow-x-scroll overflow-y-hidden overscroll-x-contain px-4 py-3 touch-pan-x focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#5288c1]"
+            style={{ scrollbarWidth: 'thin', scrollbarColor: '#5288c1 #121b24', WebkitOverflowScrolling: 'touch' }}
           >
-            <Sliders className="w-4 h-4" />
-            تنظیمات کلان سیستم
-          </button>
-          <button
-            onClick={() => setActiveTab('reports')}
-            className={`px-4 py-2 text-xs font-semibold rounded-xl transition-colors flex items-center gap-2 shrink-0 ${
-              activeTab === 'reports' ? 'bg-[#5288c1] text-white shadow-xs' : 'text-gray-400 hover:text-white hover:bg-[#242f3d]'
-            }`}
-          >
-            <Flag className="w-4 h-4" />
-            گزارش‌های تخلف
-            {reports.filter(r => r.status === 'pending').length > 0 && (
-              <span className="bg-rose-500 text-white text-[10px] px-1.5 py-0.2 rounded-full">
-                {reports.filter(r => r.status === 'pending').length}
-              </span>
-            )}
-          </button>
-          <button
-            onClick={() => setActiveTab('users')}
-            className={`px-4 py-2 text-xs font-semibold rounded-xl transition-colors flex items-center gap-2 shrink-0 ${
-              activeTab === 'users' ? 'bg-[#5288c1] text-white shadow-xs' : 'text-gray-400 hover:text-white hover:bg-[#242f3d]'
-            }`}
-          >
-            <Users className="w-4 h-4" />
-            مدیریت کاربران ({usersList.length || '...'})
-          </button>
-          <button
-            onClick={() => setActiveTab('chats')}
-            className={`px-4 py-2 text-xs font-semibold rounded-xl transition-colors flex items-center gap-2 shrink-0 ${
-              activeTab === 'chats' ? 'bg-[#5288c1] text-white shadow-xs' : 'text-gray-400 hover:text-white hover:bg-[#242f3d]'
-            }`}
-          >
-            <MessageSquare className="w-4 h-4" />
-            کانال‌ها و گروه‌ها ({chatsList.length || '...'})
-          </button>
-          <button
-            onClick={() => setActiveTab('database')}
-            className={`px-4 py-2 text-xs font-semibold rounded-xl transition-colors flex items-center gap-2 shrink-0 ${
-              activeTab === 'database' ? 'bg-[#5288c1] text-white shadow-xs' : 'text-gray-400 hover:text-white hover:bg-[#242f3d]'
-            }`}
-          >
-            <Database className="w-4 h-4 text-emerald-400" />
-            مدیریت پایگاه‌داده
-          </button>
+            <button
+              onClick={() => setActiveTab('system')}
+              className={`px-4 py-2 text-xs font-semibold rounded-xl transition-colors flex items-center gap-2 shrink-0 ${
+                activeTab === 'system' ? 'bg-[#5288c1] text-white shadow-xs' : 'text-gray-400 hover:text-white hover:bg-[#242f3d]'
+              }`}
+            >
+              <Sliders className="w-4 h-4" />
+              تنظیمات کلان سیستم
+            </button>
+            <button
+              onClick={() => setActiveTab('reports')}
+              className={`px-4 py-2 text-xs font-semibold rounded-xl transition-colors flex items-center gap-2 shrink-0 ${
+                activeTab === 'reports' ? 'bg-[#5288c1] text-white shadow-xs' : 'text-gray-400 hover:text-white hover:bg-[#242f3d]'
+              }`}
+            >
+              <Flag className="w-4 h-4" />
+              گزارش‌های تخلف
+              {reports.filter(r => r.status === 'pending').length > 0 && (
+                <span className="bg-rose-500 text-white text-[10px] px-1.5 py-0.2 rounded-full">
+                  {reports.filter(r => r.status === 'pending').length}
+                </span>
+              )}
+            </button>
+            <button
+              onClick={() => setActiveTab('users')}
+              className={`px-4 py-2 text-xs font-semibold rounded-xl transition-colors flex items-center gap-2 shrink-0 ${
+                activeTab === 'users' ? 'bg-[#5288c1] text-white shadow-xs' : 'text-gray-400 hover:text-white hover:bg-[#242f3d]'
+              }`}
+            >
+              <Users className="w-4 h-4" />
+              مدیریت کاربران ({usersList.length || '...'})
+            </button>
+            <button
+              onClick={() => setActiveTab('chats')}
+              className={`px-4 py-2 text-xs font-semibold rounded-xl transition-colors flex items-center gap-2 shrink-0 ${
+                activeTab === 'chats' ? 'bg-[#5288c1] text-white shadow-xs' : 'text-gray-400 hover:text-white hover:bg-[#242f3d]'
+              }`}
+            >
+              <MessageSquare className="w-4 h-4" />
+              کانال‌ها و گروه‌ها ({chatsList.length || '...'})
+            </button>
+            <button
+              onClick={() => setActiveTab('database')}
+              className={`px-4 py-2 text-xs font-semibold rounded-xl transition-colors flex items-center gap-2 shrink-0 ${
+                activeTab === 'database' ? 'bg-[#5288c1] text-white shadow-xs' : 'text-gray-400 hover:text-white hover:bg-[#242f3d]'
+              }`}
+            >
+              <Database className="w-4 h-4 text-emerald-400" />
+              مدیریت پایگاه‌داده
+            </button>
+          </div>
         </div>
 
         {/* Tab 1: System Settings */}

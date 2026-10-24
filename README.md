@@ -5,9 +5,13 @@
 [![MIT License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Build](https://github.com/arimakomi/StarGram/actions/workflows/build.yml/badge.svg)](https://github.com/arimakomi/StarGram/actions/workflows/build.yml)
 
-StarGram is a self-hosted web messenger with a Persian right-to-left interface. It supports private chats, groups, channels, stories, administration, and optional Gemini assistance. Data can be stored in PostgreSQL, MySQL/MariaDB, or a local JSON file.
+StarGram is an open-source, self-hosted web messenger with a Persian right-to-left interface. It supports private chats, groups, channels, stories, an administrator panel, and optional Gemini assistance. Data can be stored in PostgreSQL, MySQL/MariaDB, or a local JSON file.
 
-User guides (Persian): [General help](help/README.md) · [Web messenger guides](help/web/README.md)
+**Project site:** [StarGram on GitHub Pages](https://arimakomi.github.io/StarGram/) · [Complete online help](https://arimakomi.github.io/StarGram/help/) · [Install guide](https://arimakomi.github.io/StarGram/help/install.html)
+
+The Pages site hosts project information and documentation only. Run the messenger and its API on your own Node.js server.
+
+**User guides:** [Help index](help/README.md) · [Web messenger guides](help/web/README.md) · [Administrator panel guide](help/web/admin-panel.md) · [App/PWA status](help/app/README.md)
 
 ## Features
 
@@ -19,6 +23,22 @@ User guides (Persian): [General help](help/README.md) · [Web messenger guides](
 - Optional Gemini assistant with configurable API key, model, and proxy
 - Linux installer, systemd service, and English-language stargram management menu
 - GitHub Actions builds the project on every push and pull request
+
+## Website and documentation
+
+The responsive project site introduces StarGram, links to installation and server-management instructions, and provides a searchable help index with a separate page for each topic. GitHub Pages publishes the static site from `pages/`; the application itself still needs the Node.js API server.
+
+Documentation is organized by audience and topic:
+
+- `help/getting-started.fa.md` — first steps and core concepts
+- `help/web/` — account, private chats, groups, channels, messages, stories, search, settings, PWA, and the administrator panel
+- `help/app/` — current native-app status and PWA guidance
+- `help/readmes/` — translated project READMEs
+- `pages/` — the GitHub Pages site and online, multi-page guide
+
+## Administrator panel
+
+The web panel is available to system administrators and has separate sections for system-wide feature switches, user reports, user accounts, groups and channels, and database data. Admins can review reports, manage account roles and access, lock or remove a chat, configure optional Gemini assistance, and export or restore local JSON data. The database area also contains a destructive emergency wipe control; take an independent backup and verify the target before using destructive actions. See the [administrator panel guide](help/web/admin-panel.md).
 
 ## Requirements
 
@@ -35,7 +55,7 @@ Run the interactive installer as root:
 bash <(curl -fsSL https://raw.githubusercontent.com/arimakomi/StarGram/main/setup.sh)
 ~~~
 
-The installer checks for Node.js 20, asks for the port, administrator credentials, and database type, installs dependencies, builds the frontend, enables a systemd service when available, and installs the stargram command. Installer prompts and the management menu are in English.
+The installer requires Node.js 18 or newer; when Node.js is missing or too old, it installs Node.js 20 LTS. It asks for the port, administrator credentials, and database type, installs dependencies, builds the frontend, enables a systemd service when available, and installs the `stargram` command. Installer prompts and the management menu are in English.
 
 For a non-interactive local-storage installation:
 
