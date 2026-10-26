@@ -925,14 +925,14 @@ const ChatArea: React.FC<ChatAreaProps> = ({
               setZoomScale(1);
               setPanOffset({ x: 0, y: 0 });
             }}
-            className="rounded-xl overflow-hidden cursor-pointer group/img relative mb-1.5 bg-black/20"
+            className="rounded-xl overflow-hidden cursor-pointer group/img relative mb-1.5 bg-white shadow-xs"
             title="کلیک برای بزرگنمایی کامل تصویر"
           >
             {autoDownloadPhotos || revealedImages.has(msg.id) ? (
               <img
                 src={msg.imageUrl}
                 loading={autoDownloadPhotos ? 'eager' : 'lazy'}
-                className="max-h-[360px] w-full object-cover rounded-xl transition-transform duration-200 group-hover/img:scale-[1.02]"
+                className="max-h-[360px] w-full object-cover rounded-xl transition-transform duration-200 group-hover/img:scale-[1.02] bg-white"
               />
             ) : (
               <button
@@ -1856,7 +1856,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                 maxHeight: '85vh',
                 maxWidth: '90vw'
               }}
-              className="object-contain rounded-xl shadow-2xl select-none touch-none"
+              className="object-contain rounded-xl shadow-2xl select-none touch-none bg-white"
             />
           </div>
 

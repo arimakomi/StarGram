@@ -1026,7 +1026,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ user, onClose, onUpdateUs
                         onChange={async (e) => {
                           const file = e.target.files?.[0];
                           if (file) {
-                            const compressed = await compressImage(file, 1600, 0.85);
+                            const compressed = await compressImage(file, 1600, 1600, 0.85);
                             onUpdateUser({ ...user, wallpaper: compressed });
                           }
                         }}
