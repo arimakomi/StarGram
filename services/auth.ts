@@ -43,5 +43,19 @@ export const authApi = {
   revokeOtherSessions: () => call('/api/auth/sessions/revoke-others', { method: 'POST' }),
   heartbeat: () => call('/api/users/heartbeat', { method: 'POST' }),
   logout: async () => { await call('/api/auth/logout', { method: 'POST' }); setToken(null); },
-  deleteAccount: async () => { const r = await call('/api/auth/delete-account', { method: 'POST' }); setToken(null); return r; }
+  deleteAccount: async () => { const r = await call('/api/auth/delete-account', { method: 'POST' }); setToken(null); return r; },
+  checkPhone: async (phone: string, excludeUserId?: string) => {
+    return call(`/api/users/check-phone/${encodeURIComponent(phone)}${excludeUserId ? `?excludeUserId=${encodeURIComponent(excludeUserId)}` : ''}`);
+  },
+  sendOtp: async (phone: string, purpose: 'login' | 'verify' = 'login', userId?: string) => {
+    return call('/api/sms/send-otp', { method: 'POST', json: { phone, purpose, userId } });
+  },
+  verifyOtp: async (payload: { phone: string; code: string; purpose?: 'login' | 'verify'; userId?: string; username?: string; displayName?: string }) => {
+    const r = await call('/api/sms/verify-otp', { method: 'POST', json: payload });
+    if (r.success && r.token) setToken(r.token);
+    return r;
+  },
+  testSms: async (payload: { phone: string; smsApiKey?: string; smsLineNumber?: string; smsSendMode?: string; smsPatternCode?: string; smsPatternVarName?: string }) => {
+    return call('/api/admin/sms/test', { method: 'POST', json: payload });
+  }
 };

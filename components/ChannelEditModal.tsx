@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { 
   Chat, User, AdminPermissions, InviteLinkItem, RecentActionItem, RemovedUserItem, DEFAULT_AVATAR 
 } from '../types';
@@ -7,9 +7,10 @@ import {
   ShieldCheck, Users, ClipboardList, Check, Copy, RefreshCw, Plus, 
   Trash2, Shield, UserX, UserCheck, AlertTriangle, ArrowRight, Lock, 
   Globe, Sparkles, MessageSquare, Search, Clock, FileSignature, 
-  UserCircle2, UserMinus, Eye, CheckCircle2, ShieldAlert
+  UserCircle2, UserMinus, Eye, CheckCircle2, ShieldAlert, Camera, Upload
 } from 'lucide-react';
 import { generateLocalAvatarSvg } from '../services/avatarGenerator';
+import { compressImage } from '../services/imageUtils';
 
 interface ChannelEditModalProps {
   chat: Chat;
@@ -39,6 +40,8 @@ export const ChannelEditModal: React.FC<ChannelEditModalProps> = ({
   const [channelName, setChannelName] = useState(chat.groupName || '');
   const [channelDesc, setChannelDesc] = useState(chat.description || '');
   const [channelAvatar, setChannelAvatar] = useState(chat.groupAvatar || '');
+  const avatarFileInputRef = useRef<HTMLInputElement>(null);
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
 
   // 1. Channel Type State
   const [isPublic, setIsPublic] = useState<boolean>(Boolean(chat.isPublic));
@@ -264,12 +267,35 @@ export const ChannelEditModal: React.FC<ChannelEditModalProps> = ({
     return Array.from(set.values());
   }, [chats, subscribersList, currentUser.id]);
 
+  // Avatar Upload and Remove Handlers
+  const handleAvatarFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      setIsUploadingAvatar(true);
+      const compressed = await compressImage(file, 512, 512, 0.85);
+      setChannelAvatar(compressed);
+      logRecentAction('تصویر کانال تغییر کرد', 'آپلود تصویر جدید از دستگاه', 'change_photo');
+    } catch (err) {
+      console.error('Error compressing channel avatar:', err);
+      alert('خطا در پردازش و بارگذاری تصویر');
+    } finally {
+      setIsUploadingAvatar(false);
+      if (e.target) e.target.value = '';
+    }
+  };
+
+  const handleRemoveAvatar = () => {
+    setChannelAvatar('');
+    logRecentAction('تصویر کانال حذف شد', undefined, 'remove_photo');
+  };
+
   // Save all changes
   const handleSaveAll = () => {
     const updatedPayload = {
       groupName: channelName.trim() || chat.groupName,
       description: channelDesc.trim(),
-      groupAvatar: channelAvatar || chat.groupAvatar,
+      groupAvatar: channelAvatar,
       isPublic,
       publicHandle: isPublic ? publicHandle.trim() : '',
       signMessages,
@@ -351,13 +377,46 @@ export const ChannelEditModal: React.FC<ChannelEditModalProps> = ({
           {activeView === 'main' && (
             <div className="space-y-4">
               {/* Channel Avatar & Names */}
-              <div className="flex flex-col items-center gap-3 pb-3 border-b border-white/5">
-                <div className="relative group">
+              <input
+                ref={avatarFileInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={handleAvatarFileUpload}
+              />
+              <div className="flex flex-col items-center gap-2 pb-3 border-b border-white/5">
+                <div 
+                  onClick={() => avatarFileInputRef.current?.click()}
+                  className="relative group cursor-pointer w-20 h-20 rounded-full overflow-hidden border-2 border-[#3390ec]/50 hover:border-[#3390ec] shadow-xl bg-[#17212b] transition-all hover:scale-105"
+                  title="انتخاب عکس از دستگاه"
+                >
                   <img 
-                    src={channelAvatar || chat.groupAvatar || DEFAULT_AVATAR}
+                    src={channelAvatar || DEFAULT_AVATAR}
                     onError={(e) => { e.currentTarget.src = DEFAULT_AVATAR; }}
-                    className="w-20 h-20 rounded-full object-cover border-2 border-[#3390ec]/40 shadow-xl bg-[#242f3d]"
+                    className="w-full h-full object-cover"
                   />
+                  <div className="absolute inset-0 bg-black/55 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center text-white backdrop-blur-[2px]">
+                    <Camera size={22} className="mb-0.5 text-[#3390ec]" />
+                    <span className="text-[9.5px] font-bold">تغییر عکس</span>
+                  </div>
+                  {isUploadingAvatar && (
+                    <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
+                      <RefreshCw size={20} className="text-[#3390ec] animate-spin" />
+                    </div>
+                  )}
+                </div>
+
+                {/* Avatar Action Buttons */}
+                <div className="flex items-center gap-1.5 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => avatarFileInputRef.current?.click()}
+                    className="px-2.5 py-1.5 bg-[#3390ec]/15 hover:bg-[#3390ec]/25 text-[#3390ec] border border-[#3390ec]/30 rounded-xl text-[11px] font-bold flex items-center gap-1 transition-all active:scale-95"
+                    title="انتخاب تصویر دلخواه از دستگاه"
+                  >
+                    <Camera size={13} />
+                    <span>انتخاب عکس</span>
+                  </button>
                   <button
                     type="button"
                     onClick={() => {
@@ -365,25 +424,22 @@ export const ChannelEditModal: React.FC<ChannelEditModalProps> = ({
                       setChannelAvatar(newSvg);
                       logRecentAction('تصویر کانال تغییر کرد', undefined, 'change_photo');
                     }}
-                    className="absolute inset-0 bg-black/40 group-hover:opacity-100 opacity-0 rounded-full flex flex-col items-center justify-center text-white transition-opacity backdrop-blur-xs"
-                    title="تولید تصویر خودکار"
+                    className="p-1.5 bg-white/5 hover:bg-white/10 text-amber-300 rounded-xl transition-all active:scale-95"
+                    title="تولید خودکار تصویر مینیمال"
                   >
-                    <Sparkles size={18} className="text-amber-300 mb-0.5" />
-                    <span className="text-[10px] font-bold">تغییر</span>
+                    <Sparkles size={15} />
                   </button>
+                  {Boolean(channelAvatar) && (
+                    <button
+                      type="button"
+                      onClick={handleRemoveAvatar}
+                      className="p-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-xl transition-all active:scale-95"
+                      title="حذف تصویر فعلی"
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  )}
                 </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const newSvg = generateLocalAvatarSvg(channelName || 'Channel', Date.now().toString());
-                    setChannelAvatar(newSvg);
-                    logRecentAction('تصویر کانال تغییر کرد', undefined, 'change_photo');
-                  }}
-                  className="px-3 py-1 bg-white/5 hover:bg-white/10 text-xs font-bold text-[#3390ec] rounded-xl transition-all flex items-center gap-1.5"
-                >
-                  <Sparkles size={13} />
-                  <span>تولید تصویر خودکار</span>
-                </button>
               </div>
 
               {/* Channel Name */}

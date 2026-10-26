@@ -11,7 +11,7 @@ import {
   Link as LinkIcon, Edit3, Shield, ShieldCheck, Copy, Users, Bookmark, RotateCcw, Clock, 
   ArrowRight, Search, Play, Pause, Download, Share2, Globe, Heart, ThumbsUp, Flame, Check,
   ZoomIn, ZoomOut, Phone, Bell, BellOff, Trash2, AtSign, FileText, CheckCircle2, Flag,
-  Eye, Calendar, Instagram, Palette, CheckCircle, RefreshCw
+  Eye, Calendar, Instagram, Palette, CheckCircle, RefreshCw, Camera
 } from 'lucide-react';
 import { compressImage } from '../services/imageUtils';
 import { encryptMessage } from '../services/cryptoUtils';
@@ -103,6 +103,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
 
   // Group / Channel Management Modals
   const [showEditGroupModal, setShowEditGroupModal] = useState(false);
+  const [showPhoneVerifyRequiredModal, setShowPhoneVerifyRequiredModal] = useState(false);
   const [editGroupName, setEditGroupName] = useState('');
   const [editGroupDesc, setEditGroupDesc] = useState('');
   const [editGroupAvatar, setEditGroupAvatar] = useState('');
@@ -177,7 +178,39 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   const [showSeenSubmenu, setShowSeenSubmenu] = useState(false);
   const [customChatWallpaperUrl, setCustomChatWallpaperUrl] = useState('');
   const chatWallpaperFileRef = useRef<HTMLInputElement>(null);
-// Auto-mark unseen messages as seen by currentUser
+  const drawerAvatarInputRef = useRef<HTMLInputElement>(null);
+  const [isUpdatingDrawerAvatar, setIsUpdatingDrawerAvatar] = useState(false);
+
+  const handleDrawerAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !chat) return;
+    const maxMb = systemConfig?.maxUploadSizeMb || 15;
+    if (file.size > maxMb * 1024 * 1024) {
+      alert(`حجم فایل انتخابی (${(file.size / (1024 * 1024)).toFixed(1)} مگابایت) از سقف مجاز (${maxMb} مگابایت) بیشتر است.`);
+      if (e.target) e.target.value = '';
+      return;
+    }
+    try {
+      setIsUpdatingDrawerAvatar(true);
+      const compressed = await compressImage(file, 512, 512, 0.85);
+      onAction('updateChatInfo', {
+        groupName: chat.groupName,
+        description: chat.description,
+        groupAvatar: compressed,
+        isPublic: chat.isPublic,
+        publicHandle: chat.publicHandle,
+        slowMode: chat.slowMode
+      });
+    } catch (err) {
+      console.error('Failed to upload chat avatar from drawer:', err);
+      alert('خطا در پردازش و بارگذاری تصویر');
+    } finally {
+      setIsUpdatingDrawerAvatar(false);
+      if (e.target) e.target.value = '';
+    }
+  };
+
+  // Auto-mark unseen messages as seen by currentUser
   useEffect(() => {
     if (!chat || !currentUser || chat.type === 'saved') return;
     const unseenIds: string[] = [];
@@ -572,7 +605,17 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     .map(id => chat.messages.find(m => m.id === id))
     .filter(Boolean) as Message[];
 
+  const isBlockedByUnverifiedPhone = Boolean(
+    systemConfig?.requireVerifiedPhoneForMessaging && 
+    systemConfig?.smsOtpEnabled !== false && 
+    !currentUser.isPhoneVerified
+  );
+
   const handleSend = async () => {
+    if (isBlockedByUnverifiedPhone) {
+      setShowPhoneVerifyRequiredModal(true);
+      return;
+    }
     if (!inputText.trim()) return;
 
     if (editingMessage) {
@@ -598,8 +641,20 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   };
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (isBlockedByUnverifiedPhone) {
+      setShowPhoneVerifyRequiredModal(true);
+      return;
+    }
     const file = e.target.files?.[0];
     if (!file) return;
+
+    const maxMb = systemConfig?.maxUploadSizeMb || 15;
+    if (file.size > maxMb * 1024 * 1024) {
+      alert(`حجم تصویر انتخابی (${(file.size / (1024 * 1024)).toFixed(1)} مگابایت) از سقف مجاز (${maxMb} مگابایت) بیشتر است.`);
+      if (e.target) e.target.value = '';
+      return;
+    }
+
     try {
       // Compress to lightweight canvas image (max 800px, 0.8 quality ~40KB)
       const compressedDataUrl = await compressImage(file, 800, 800, 0.8);
@@ -618,6 +673,10 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   };
 
   const toggleRecording = async () => {
+    if (isBlockedByUnverifiedPhone) {
+      setShowPhoneVerifyRequiredModal(true);
+      return;
+    }
     if (!isRecording) {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -627,6 +686,12 @@ const ChatArea: React.FC<ChatAreaProps> = ({
         recorder.ondataavailable = (e) => chunks.push(e.data);
         recorder.onstop = () => {
           const blob = new Blob(chunks, { type: 'audio/webm' });
+          const maxMb = systemConfig?.maxUploadSizeMb || 15;
+          if (blob.size > maxMb * 1024 * 1024) {
+            alert(`حجم فایل صوتی ضبط شده (${(blob.size / (1024 * 1024)).toFixed(1)} مگابایت) از سقف مجاز (${maxMb} مگابایت) بیشتر است.`);
+            stream.getTracks().forEach(t => t.stop());
+            return;
+          }
           const reader = new FileReader();
           reader.onloadend = () => {
             // Clean send: send user caption if any, otherwise empty string (NO dummy 'پیام صوتی' text!)
@@ -669,6 +734,10 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   };
 
   const handleCreatePoll = () => {
+    if (isBlockedByUnverifiedPhone) {
+      setShowPhoneVerifyRequiredModal(true);
+      return;
+    }
     if (!pollQuestion.trim()) return alert("لطفا سوال نظرسنجی را وارد کنید");
     const validOptions = pollOptions.filter(o => o.trim().length > 0);
     if (validOptions.length < 2) return alert("حداقل دو گزینه برای نظرسنجی وارد کنید");
@@ -1591,6 +1660,20 @@ const ChatArea: React.FC<ChatAreaProps> = ({
 
       {/* Input Bar (Mobile Ergonomic) */}
       <footer className="p-2.5 md:p-3 bg-[#17212b]/95 backdrop-blur-xl border-t border-black/20 z-20 shrink-0">
+        {/* Unverified Phone Warning Banner */}
+        {isBlockedByUnverifiedPhone && (
+          <div 
+            onClick={() => setShowPhoneVerifyRequiredModal(true)}
+            className="flex items-center justify-between p-2.5 mb-2 bg-amber-500/15 border border-amber-500/30 rounded-2xl text-amber-300 text-xs cursor-pointer hover:bg-amber-500/20 transition-colors"
+          >
+            <div className="flex items-center gap-2">
+              <Phone size={15} className="shrink-0" />
+              <span>ارسال پیام مستلزم تایید شماره همراه با پیامک (OTP) است</span>
+            </div>
+            <span className="text-[11px] font-bold text-amber-400 bg-amber-500/20 px-2 py-0.5 rounded-lg">راهنما</span>
+          </div>
+        )}
+
         {/* Reply Preview Bar */}
         {replyingTo && (
           <div className="flex items-center justify-between bg-black/30 p-2.5 mb-2 rounded-xl border-r-4 border-[#3390ec] animate-in slide-in-from-bottom">
@@ -2298,11 +2381,41 @@ const ChatArea: React.FC<ChatAreaProps> = ({
             <>
               {/* Header Profile */}
               <div className="p-6 text-center border-b border-white/5">
-                <img 
-                  src={chatInfo.avatar || DEFAULT_AVATAR} 
-                  onError={(e) => { e.currentTarget.src = DEFAULT_AVATAR; }}
-                  className="w-20 h-20 rounded-full mx-auto mb-3 object-cover shadow-lg border-2 border-white/10" 
-                />
+                {canChangeInfo && (
+                  <input
+                    ref={drawerAvatarInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={handleDrawerAvatarUpload}
+                  />
+                )}
+                <div 
+                  onClick={() => {
+                    if (canChangeInfo) drawerAvatarInputRef.current?.click();
+                  }}
+                  className={`w-20 h-20 rounded-full mx-auto mb-3 relative overflow-hidden shadow-lg border-2 border-white/10 group ${
+                    canChangeInfo ? 'cursor-pointer hover:border-[#3390ec]' : ''
+                  }`}
+                  title={canChangeInfo ? "برای انتخاب و تغییر عکس کلیک کنید" : undefined}
+                >
+                  <img 
+                    src={chatInfo.avatar || DEFAULT_AVATAR} 
+                    onError={(e) => { e.currentTarget.src = DEFAULT_AVATAR; }}
+                    className="w-full h-full object-cover" 
+                  />
+                  {canChangeInfo && (
+                    <div className="absolute inset-0 bg-black/55 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center text-white backdrop-blur-[2px]">
+                      <Camera size={20} className="text-[#3390ec]" />
+                      <span className="text-[9px] font-bold mt-0.5">تغییر عکس</span>
+                    </div>
+                  )}
+                  {isUpdatingDrawerAvatar && (
+                    <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
+                      <RefreshCw size={20} className="text-[#3390ec] animate-spin" />
+                    </div>
+                  )}
+                </div>
                 <h4 className="font-bold text-white text-base">{chatInfo.title}</h4>
                 <p className="text-xs text-[#708499] mt-0.5">{chatInfo.status}</p>
 
@@ -2876,6 +2989,12 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                 onChange={async (e) => {
                   const file = e.target.files?.[0];
                   if (file) {
+                    const maxMb = systemConfig?.maxUploadSizeMb || 15;
+                    if (file.size > maxMb * 1024 * 1024) {
+                      alert(`حجم تصویر انتخابی (${(file.size / (1024 * 1024)).toFixed(1)} مگابایت) از سقف مجاز (${maxMb} مگابایت) بیشتر است.`);
+                      if (e.target) e.target.value = '';
+                      return;
+                    }
                     try {
                       const compressed = await compressImage(file, 1280, 1280, 0.82);
                       onAction('updateChatWallpaper', { wallpaper: compressed });
@@ -2930,6 +3049,39 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                 <span>استفاده از پس‌زمینه پیش‌فرض کلی برنامه</span>
               </button>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Phone Verification Required Notice Modal */}
+      {showPhoneVerifyRequiredModal && (
+        <div 
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-xs p-4 animate-in fade-in"
+          onClick={() => setShowPhoneVerifyRequiredModal(false)}
+        >
+          <div 
+            className="w-full max-w-sm bg-[#17212b] border border-[#242f3d] rounded-3xl p-6 shadow-2xl text-center space-y-4 animate-pop"
+            dir="rtl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="w-14 h-14 rounded-2xl bg-amber-500/15 text-amber-400 mx-auto flex items-center justify-center">
+              <Phone size={28} />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-white">تایید شماره همراه الزامی است</h3>
+              <p className="text-xs text-gray-300 mt-2 leading-relaxed">
+                طبق تنظیمات مدیریت سیستم، فقط کاربرانی که شماره تلفن همراه خود را با پیامک (OTP) تایید کرده باشند مجاز به ارسال پیام و رسانه هستند.
+              </p>
+            </div>
+            <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-2xl text-[11px] text-amber-300 leading-relaxed">
+              لطفاً از منوی سمت راست وارد «پروفایل من» شوید و شماره همراه خود را با کد تایید پیامکی فعال نمایید.
+            </div>
+            <button
+              onClick={() => setShowPhoneVerifyRequiredModal(false)}
+              className="w-full py-2.5 bg-[#3390ec] hover:bg-[#2881d9] text-white rounded-xl text-xs font-bold transition-all shadow-md active:scale-95"
+            >
+              متوجه شدم
+            </button>
           </div>
         </div>
       )}

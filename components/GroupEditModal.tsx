@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { 
   Chat, User, AdminPermissions, Permissions, InviteLinkItem, RecentActionItem, DEFAULT_AVATAR 
 } from '../types';
@@ -7,9 +7,10 @@ import {
   ShieldCheck, Users, ClipboardList, Check, Copy, RefreshCw, Plus, 
   Trash2, Shield, UserX, UserCheck, AlertTriangle, ArrowRight, Lock, 
   Globe, Sparkles, MessageSquare, Image, Mic, BarChart2, Pin, Search,
-  Clock, ShieldAlert, CheckCircle2
+  Clock, ShieldAlert, CheckCircle2, Camera, Upload
 } from 'lucide-react';
 import { generateLocalAvatarSvg } from '../services/avatarGenerator';
+import { compressImage } from '../services/imageUtils';
 
 interface GroupEditModalProps {
   chat: Chat;
@@ -39,6 +40,8 @@ export const GroupEditModal: React.FC<GroupEditModalProps> = ({
   const [groupName, setGroupName] = useState(chat.groupName || '');
   const [groupDesc, setGroupDesc] = useState(chat.description || '');
   const [groupAvatar, setGroupAvatar] = useState(chat.groupAvatar || '');
+  const avatarFileInputRef = useRef<HTMLInputElement>(null);
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
 
   // 1. Group Type State
   const [isPublic, setIsPublic] = useState<boolean>(Boolean(chat.isPublic));
@@ -181,12 +184,35 @@ export const GroupEditModal: React.FC<GroupEditModalProps> = ({
     return Array.from(set.values());
   }, [chats, membersList]);
 
+  // Avatar Upload and Remove Handlers
+  const handleAvatarFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      setIsUploadingAvatar(true);
+      const compressed = await compressImage(file, 512, 512, 0.85);
+      setGroupAvatar(compressed);
+      logRecentAction('تصویر گروه تغییر یافت', 'آپلود تصویر جدید از دستگاه', 'change_photo');
+    } catch (err) {
+      console.error('Error compressing group avatar:', err);
+      alert('خطا در پردازش و بارگذاری تصویر');
+    } finally {
+      setIsUploadingAvatar(false);
+      if (e.target) e.target.value = '';
+    }
+  };
+
+  const handleRemoveAvatar = () => {
+    setGroupAvatar('');
+    logRecentAction('تصویر گروه حذف شد', undefined, 'remove_photo');
+  };
+
   // Save all changes
   const handleSaveAll = () => {
     const updatedPayload = {
       groupName: groupName.trim() || chat.groupName,
       description: groupDesc.trim(),
-      groupAvatar: groupAvatar || chat.groupAvatar,
+      groupAvatar: groupAvatar,
       isPublic,
       publicHandle: isPublic ? publicHandle.trim() : '',
       slowMode,
@@ -263,24 +289,69 @@ export const GroupEditModal: React.FC<GroupEditModalProps> = ({
             <div className="space-y-4 animate-in fade-in">
               {/* Avatar + Name + Description Card */}
               <div className="bg-[#242f3d]/40 border border-white/5 rounded-2xl p-4 flex flex-col md:flex-row items-center gap-4">
-                <div className="relative group shrink-0">
-                  <img 
-                    src={groupAvatar || chat.groupAvatar || DEFAULT_AVATAR}
-                    onError={(e) => { e.currentTarget.src = DEFAULT_AVATAR; }}
-                    className="w-20 h-20 rounded-full object-cover border-2 border-[#3390ec]/40 shadow-xl bg-[#242f3d]"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const newSvg = generateLocalAvatarSvg(groupName || 'Group', Date.now().toString());
-                      setGroupAvatar(newSvg);
-                      logRecentAction('تصویر گروه تغییر یافت', 'تولید خودکار آواتار');
-                    }}
-                    title="تولید خودکار تصویر"
-                    className="absolute bottom-0 right-0 p-1.5 bg-[#3390ec] text-white rounded-full shadow-lg hover:scale-110 active:scale-95 transition-all"
+                <input
+                  ref={avatarFileInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={handleAvatarFileUpload}
+                />
+                <div className="flex flex-col items-center gap-2 shrink-0">
+                  <div 
+                    onClick={() => avatarFileInputRef.current?.click()}
+                    className="relative group cursor-pointer w-20 h-20 rounded-full overflow-hidden border-2 border-[#3390ec]/50 hover:border-[#3390ec] shadow-xl bg-[#17212b] transition-all hover:scale-105"
+                    title="انتخاب عکس از دستگاه"
                   >
-                    <Sparkles size={13} />
-                  </button>
+                    <img 
+                      src={groupAvatar || DEFAULT_AVATAR}
+                      onError={(e) => { e.currentTarget.src = DEFAULT_AVATAR; }}
+                      className="w-full h-full object-cover"
+                    />
+                    <div className="absolute inset-0 bg-black/55 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center text-white backdrop-blur-[2px]">
+                      <Camera size={22} className="mb-0.5 text-[#3390ec]" />
+                      <span className="text-[9.5px] font-bold">تغییر عکس</span>
+                    </div>
+                    {isUploadingAvatar && (
+                      <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
+                        <RefreshCw size={20} className="text-[#3390ec] animate-spin" />
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Actions for Avatar */}
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => avatarFileInputRef.current?.click()}
+                      className="px-2 py-1 bg-[#3390ec]/15 hover:bg-[#3390ec]/25 text-[#3390ec] border border-[#3390ec]/30 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all active:scale-95"
+                      title="انتخاب عکس از حافظه دستگاه"
+                    >
+                      <Camera size={12} />
+                      <span>انتخاب عکس</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const newSvg = generateLocalAvatarSvg(groupName || 'Group', Date.now().toString());
+                        setGroupAvatar(newSvg);
+                        logRecentAction('تصویر گروه تغییر یافت', 'تولید خودکار آواتار');
+                      }}
+                      className="p-1 bg-white/5 hover:bg-white/10 text-amber-300 rounded-lg transition-all active:scale-95"
+                      title="تولید خودکار تصویر مینیمال"
+                    >
+                      <Sparkles size={14} />
+                    </button>
+                    {Boolean(groupAvatar) && (
+                      <button
+                        type="button"
+                        onClick={handleRemoveAvatar}
+                        className="p-1 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg transition-all active:scale-95"
+                        title="حذف تصویر فعلی"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 <div className="flex-1 w-full space-y-2.5">

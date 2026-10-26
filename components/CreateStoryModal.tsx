@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { User } from '../types';
+import { User, SystemConfig } from '../types';
 import { X, Image as ImageIcon, Video as VideoIcon, Send, Sparkles, Clock, Palette, AlertCircle, Play, Pause } from 'lucide-react';
 import { compressImage } from '../services/imageUtils';
 
@@ -13,6 +13,7 @@ interface CreateStoryModalProps {
     mediaType?: 'image' | 'video' | 'text',
     durationSeconds?: number
   ) => Promise<void>;
+  systemConfig?: SystemConfig;
 }
 
 const GRADIENT_PRESETS = [
@@ -26,7 +27,8 @@ const GRADIENT_PRESETS = [
 export const CreateStoryModal: React.FC<CreateStoryModalProps> = ({
   currentUser,
   onClose,
-  onSubmitStory
+  onSubmitStory,
+  systemConfig
 }) => {
   const [mediaUrl, setMediaUrl] = useState<string>('');
   const [caption, setCaption] = useState('');
@@ -52,6 +54,12 @@ export const CreateStoryModal: React.FC<CreateStoryModalProps> = ({
       return;
     }
 
+    const maxMb = systemConfig?.maxUploadSizeMb || 15;
+    if (file.size > maxMb * 1024 * 1024) {
+      setErrorMsg(`حجم تصویر انتخابی (${(file.size / (1024 * 1024)).toFixed(1)} مگابایت) از سقف مجاز (${maxMb} مگابایت) بیشتر است.`);
+      return;
+    }
+
     try {
       const compressed = await compressImage(file, 800, 1200, 0.85);
       setMediaUrl(compressed);
@@ -72,9 +80,9 @@ export const CreateStoryModal: React.FC<CreateStoryModalProps> = ({
       return;
     }
 
-    // Limit video file size to 25MB for smooth local storage
-    if (file.size > 25 * 1024 * 1024) {
-      setErrorMsg('حجم ویدیو نمی‌تواند بیش از ۲۵ مگابایت باشد.');
+    const maxMb = systemConfig?.maxUploadSizeMb || 15;
+    if (file.size > maxMb * 1024 * 1024) {
+      setErrorMsg(`حجم ویدیو نمی‌تواند بیش از ${maxMb} مگابایت باشد.`);
       return;
     }
 

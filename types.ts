@@ -115,6 +115,7 @@ export interface User {
   lastSeen?: number;
   bio?: string;
   phone?: string;
+  isPhoneVerified?: boolean;
   birthday?: string;
   telegramId?: string;
   instagramId?: string;
@@ -219,11 +220,25 @@ export interface SystemConfig {
   allowChannelCreation?: boolean;
   allowPublicChannels?: boolean;
   allowStories?: boolean;
+  maxUploadSizeMb?: number; // Maximum upload file size in Megabytes (default: 15)
   defaultUserRole?: 'user' | string;
   geminiApiKey?: string;
   geminiEnabled?: boolean;
   geminiProxyUrl?: string;
   geminiModel?: string;
+
+  // SMS & OTP (Iran Payamak) Configuration
+  smsProvider?: 'iranpayamak';
+  smsOtpEnabled?: boolean; // Master toggle: Enable/Disable OTP entirely (default true)
+  smsFallbackEnabled?: boolean; // Toggle: Enable/Disable simulated OTP fallback (default true)
+  smsApiKey?: string;
+  smsLineNumber?: string;
+  smsSendMode?: 'pattern' | 'standard'; // 'pattern' (fast template) or 'standard' (regular sms)
+  smsPatternCode?: string;
+  smsPatternVarName?: string; // name of template variable, e.g. 'code' or 'otp'
+  otpExpiresInMinutes?: number; // validity time in minutes (default 2)
+  otpCodeLength?: number; // 5 or 6 digits (default 6)
+  requireVerifiedPhoneForMessaging?: boolean; // Toggle: only users with verified phone can send messages
 
   // Branding & Identity Customization
   appName?: string;

@@ -65,7 +65,7 @@ Content-Type: application/json
 | متد | مسیر | توضیحات |
 |---|---|---|
 | `GET` | `/api/v1/chats/:id/messages` | دریافت پیام‌های یک گفتگو (`limit`, `before`, `after`) |
-| `POST` | `/api/v1/chats/:id/messages` | ارسال پیام جدید (متنی، رسانه‌ای، نظرسنجی، ریپلای) |
+| `POST` | `/api/v1/chats/:id/messages` | ارسال پیام جدید (متنی، رسانه‌ای، نظرسنجی، ریپلای). در صورت تجاوز حجم مدیا از سقف مجاز سرور (`maxUploadSizeMb`)، خطای `413 Payload Too Large` برمی‌گرداند. |
 | `DELETE` | `/api/v1/chats/:id/messages/:msgId` | حذف پیام |
 | `POST` | `/api/v1/chats/:id/messages/:msgId/reactions` | ثبت واکنش ایموجی روی پیام |
 
@@ -85,6 +85,14 @@ Content-Type: application/json
 | `DELETE` | `/api/v1/sessions/:id` | خاتمه دادن به یک نشست مشخص و لغو دسترسی دستگاه |
 | `POST` | `/api/v1/sessions/terminate-others` | خاتمه دادن به تمام نشست‌های دیگر کاربر به جز نشست جاری |
 
+### ز) سامانه پیامک، اعتبارسنجی شماره همراه و ورود OTP (Iran Payamak)
+| متد | مسیر | توضیحات |
+|---|---|---|
+| `GET` | `/api/users/check-phone/:phone` | بررسی یکتا و آزاد بودن شماره همراه جهت ثبت |
+| `POST` | `/api/v1/sms/send-otp` | ارسال کد تایید یکبار مصرف (`phone`, `purpose: 'login'\|'verify'`) |
+| `POST` | `/api/v1/sms/verify-otp` | بررسی صحت کد OTP، تایید شماره یا لاگین و ثبت‌نام خودکار |
+| `POST` | `/api/v1/admin/sms/test` | تست زنده ارسال پیامک درگاه ایران پیامک (مخصوص مدیر) |
+
 ---
 
 ## ۴. ساختار شیء تنظیمات اعلان نشست (SessionNotificationSettings)
@@ -100,7 +108,79 @@ Content-Type: application/json
 
 ---
 
-## ۵. نمونه کدهای عملی
+## ۵. راهنمای کار با وب‌سرویس پیامک و ورود با OTP (Iran Payamak)
+
+### ۱. ارسال کد تایید یکبار مصرف (`POST /api/v1/sms/send-otp`)
+```json
+// Request Body
+{
+  "phone": "09121234567",
+  "purpose": "login", // یا "verify" برای تایید شماره در پروفایل
+  "userId": "optional_user_id" // در حالت verify الزامی است
+}
+
+// Response
+{
+  "success": true,
+  "message": "کد تایید ارسال شد.",
+  "simulated": false, // اگر در حالت fallback باشد true برمی‌گرداند
+  "expiresInSeconds": 120
+}
+```
+
+### ۲. اعتبارسنجی کد و ورود / ثبت‌نام (`POST /api/v1/sms/verify-otp`)
+```json
+// Request Body
+{
+  "phone": "09121234567",
+  "code": "123456",
+  "purpose": "login", // یا "verify"
+  "username": "my_new_username", // اختیاری؛ فقط در صورت ثبت‌نام کاربر جدید
+  "displayName": "نام و نام خانوادگی" // اختیاری؛ برای کاربر جدید
+}
+
+// Response (در صورت ورود موفق)
+{
+  "success": true,
+  "message": "ورود با موفقیت انجام شد.",
+  "token": "stg_sess_...",
+  "user": {
+    "id": "my_username",
+    "username": "my_username",
+    "displayName": "...",
+    "phone": "09121234567",
+    "isPhoneVerified": true
+  }
+}
+```
+
+### ۳. فیلدهای پیکربندی پیامک در `PATCH /api/v1/admin/config`
+- `smsOtpEnabled` (Boolean): فعال یا غیرفعال بودن کل سیستم تایید پیامکی و لاگین با شماره (پیش‌فرض true).
+- `smsFallbackEnabled` (Boolean): فعال یا غیرفعال بودن حالت شبیه‌سازی اضطراری در زمان قطعی یا عدم شارژ درگاه (پیش‌فرض true).
+- `smsApiKey` (String): توکن وب‌سرویس پنل ایران پیامک.
+- `smsLineNumber` (String): خط اختصاصی ارسال پیامک.
+- `smsSendMode` ('pattern' | 'standard'): ارسال با پترن خدماتی پرسرعت یا خط عادی.
+- `smsPatternCode` (String): کد قالب پترن تایید شده در ایران پیامک.
+- `smsPatternVarName` (String): نام متغیر در الگو (پیش‌فرض code).
+- `otpExpiresInMinutes` (Number): زمان اعتبار کد (۱ تا ۵ دقیقه).
+- `otpCodeLength` (Number): طول کد تایید (۵ یا ۶ رقم).
+- `requireVerifiedPhoneForMessaging` (Boolean): محدودیت ارسال پیام فقط برای کاربران با شماره تایید شده.
+- `maxUploadSizeMb` (Number): حداکثر سقف مجاز حجم فایل‌ها و رسانه‌های ارسالی کاربران به مگابایت (پیش‌فرض ۱۵ مگابایت؛ گزینه‌های ۵، ۱۰، ۱۵، ۲۵ یا ۵۰ مگابایت). در صورت تجاوز حجم فایل، خطای HTTP `413 Payload Too Large` صادر می‌گردد.
+
+---
+
+## ۶. کدهای خطای مهم سرور (Error Codes)
+- **`400 Bad Request`**: نقص در پارامترهای ارسالی یا فرمت نامعتبر شماره همراه / نام کاربری.
+- **`401 Unauthorized`**: نیاز به توکن Bearer یا انقضای نشست.
+- **`403 Forbidden`**: عدم برخورداری از دسترسی مدیر یا الزام به شماره همراه تایید شده (`requireVerifiedPhoneForMessaging`).
+- **`404 Not Found`**: منبع مورد نظر (چت، کاربر، پیام یا نشست) یافت نشد.
+- **`409 Conflict`**: شماره همراه یا نام کاربری تکراری است.
+- **`413 Payload Too Large`**: حجم رسانه یا فایل ارسالی بیشتر از سقف مجاز تعریف‌شده توسط مدیریت (`maxUploadSizeMb`) است.
+- **`429 Too Many Requests`**: بیش از حد مجاز بودن تعداد درخواست‌های ارسال OTP یا ورود ناموفق.
+
+---
+
+## ۶. نمونه کدهای عملی
 
 ### ۱. جاوااسکریپت / Node.js
 ```javascript

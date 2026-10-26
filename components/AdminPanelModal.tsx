@@ -5,9 +5,11 @@ import {
   Check, Ban, UserCheck, Key, ShieldOff, Trash2, Lock, Unlock, 
   Search, RefreshCw, Clock, Filter, Eye, EyeOff, Power,
   Database, Download, Upload, HardDrive, FileJson, RotateCcw, CheckCircle2,
-  Bot, Sparkles, Globe, Copy, ExternalLink, Code2, PlusCircle, CheckCheck
+  Bot, Sparkles, Globe, Copy, ExternalLink, Code2, PlusCircle, CheckCheck,
+  Smartphone, Phone, Send, ShieldCheck
 } from 'lucide-react';
 import { getToken } from '../services/auth';
+import { compressImage } from '../services/imageUtils';
 import { 
   collection, getDocs, doc, setDoc, updateDoc, deleteDoc, db,
   getAllDatabaseCollectionsData, restoreAllDatabaseCollectionsData, getRawCollectionStore, clearAllDatabaseData
@@ -29,7 +31,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
   onClose,
   onRefreshData
 }) => {
-  const [activeTab, setActiveTab] = useState<'system' | 'branding' | 'api' | 'reports' | 'users' | 'chats' | 'database'>('system');
+  const [activeTab, setActiveTab] = useState<'system' | 'sms' | 'branding' | 'api' | 'reports' | 'users' | 'chats' | 'database'>('system');
   // Panic Button Wipe state
   const [showPanicModal, setShowPanicModal] = useState(false);
   const [panicConfirmInput, setPanicConfirmInput] = useState('');
@@ -98,6 +100,36 @@ const handleExecutePanic = async () => {
   const [accentColor, setAccentColor] = useState<string>(systemConfig.accentColor || '#3390ec');
   const [isSavingBranding, setIsSavingBranding] = useState(false);
   const [brandingSaveSuccess, setBrandingSaveSuccess] = useState(false);
+
+  // File Upload Refs for Branding
+  const fileInputRefLogo = useRef<HTMLInputElement>(null);
+  const fileInputRefSymbol = useRef<HTMLInputElement>(null);
+  const fileInputRefBanner = useRef<HTMLInputElement>(null);
+
+  // Max Upload Size Configuration State (in MB)
+  const [maxUploadSizeMb, setMaxUploadSizeMb] = useState<number>(systemConfig.maxUploadSizeMb || 15);
+  const [isSavingMaxUploadSize, setIsSavingMaxUploadSize] = useState(false);
+  const [maxUploadSaveSuccess, setMaxUploadSaveSuccess] = useState(false);
+
+  // SMS & OTP (Iran Payamak) State
+  const [smsOtpEnabled, setSmsOtpEnabled] = useState<boolean>(systemConfig.smsOtpEnabled !== false);
+  const [smsFallbackEnabled, setSmsFallbackEnabled] = useState<boolean>(systemConfig.smsFallbackEnabled !== false);
+  const [smsApiKey, setSmsApiKey] = useState<string>(systemConfig.smsApiKey || '');
+  const [smsLineNumber, setSmsLineNumber] = useState<string>(systemConfig.smsLineNumber || '');
+  const [smsSendMode, setSmsSendMode] = useState<'pattern' | 'standard'>(systemConfig.smsSendMode || 'pattern');
+  const [smsPatternCode, setSmsPatternCode] = useState<string>(systemConfig.smsPatternCode || '');
+  const [smsPatternVarName, setSmsPatternVarName] = useState<string>(systemConfig.smsPatternVarName || 'code');
+  const [otpExpiresInMinutes, setOtpExpiresInMinutes] = useState<number>(systemConfig.otpExpiresInMinutes || 2);
+  const [otpCodeLength, setOtpCodeLength] = useState<number>(systemConfig.otpCodeLength || 6);
+  const [requireVerifiedPhoneForMessaging, setRequireVerifiedPhoneForMessaging] = useState<boolean>(systemConfig.requireVerifiedPhoneForMessaging ?? false);
+  const [showSmsApiKey, setShowSmsApiKey] = useState(false);
+  const [isSavingSms, setIsSavingSms] = useState(false);
+  const [smsSaveSuccess, setSmsSaveSuccess] = useState(false);
+
+  // Test SMS State
+  const [smsTestPhone, setSmsTestPhone] = useState('');
+  const [isTestingSms, setIsTestingSms] = useState(false);
+  const [smsTestResult, setSmsTestResult] = useState<{ success: boolean; simulated?: boolean; message: string; code?: string; error?: string } | null>(null);
 
   // API Tokens State
   const [apiTokens, setApiTokens] = useState<ApiToken[]>([]);
@@ -253,6 +285,166 @@ const handleExecutePanic = async () => {
       alert('خطا در ذخیره تنظیمات برند.');
     } finally {
       setIsSavingBranding(false);
+    }
+  };
+
+  const handleSaveMaxUploadSize = async () => {
+    setIsSavingMaxUploadSize(true);
+    try {
+      const val = Math.max(1, Math.min(100, Number(maxUploadSizeMb) || 15));
+      const updatedConfig: Partial<SystemConfig> = { maxUploadSizeMb: val };
+      await onUpdateSystemConfig(updatedConfig);
+      setCfg(prev => ({ ...prev, ...updatedConfig }));
+      const token = getToken();
+      await fetch('/api/v1/admin/config', {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify(updatedConfig)
+      });
+      setMaxUploadSaveSuccess(true);
+      setTimeout(() => setMaxUploadSaveSuccess(false), 3000);
+    } catch (e) {
+      console.error('Error saving max upload size:', e);
+      alert('خطا در ذخیره سقف حجم آپلود');
+    } finally {
+      setIsSavingMaxUploadSize(false);
+    }
+  };
+
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      // preserveTransparency = true ensures transparent PNGs remain completely transparent without white background!
+      const dataUrl = await compressImage(file, 800, 400, 0.9, true);
+      setCustomLogoUrl(dataUrl);
+    } catch (err) {
+      console.error('Error processing logo image:', err);
+      alert('خطا در بارگذاری تصویر لوگو');
+    } finally {
+      if (fileInputRefLogo.current) fileInputRefLogo.current.value = '';
+    }
+  };
+
+  const handleSymbolUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      // preserveTransparency = true ensures transparent PNGs remain completely transparent without white background!
+      const dataUrl = await compressImage(file, 512, 512, 0.9, true);
+      setCustomSymbolUrl(dataUrl);
+    } catch (err) {
+      console.error('Error processing symbol image:', err);
+      alert('خطا در بارگذاری نماد مینیمال');
+    } finally {
+      if (fileInputRefSymbol.current) fileInputRefSymbol.current.value = '';
+    }
+  };
+
+  const handleBannerUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const dataUrl = await compressImage(file, 1200, 600, 0.9, true);
+      setLoginBannerUrl(dataUrl);
+    } catch (err) {
+      console.error('Error processing banner image:', err);
+      alert('خطا در بارگذاری بنر');
+    } finally {
+      if (fileInputRefBanner.current) fileInputRefBanner.current.value = '';
+    }
+  };
+
+  const handleSaveSmsConfig = async () => {
+    setIsSavingSms(true);
+    setSmsSaveSuccess(false);
+    try {
+      const updatedSmsConfig: Partial<SystemConfig> = {
+        smsProvider: 'iranpayamak',
+        smsOtpEnabled,
+        smsFallbackEnabled,
+        smsApiKey: smsApiKey.trim(),
+        smsLineNumber: smsLineNumber.trim(),
+        smsSendMode,
+        smsPatternCode: smsPatternCode.trim(),
+        smsPatternVarName: smsPatternVarName.trim() || 'code',
+        otpExpiresInMinutes: Number(otpExpiresInMinutes) || 2,
+        otpCodeLength: Number(otpCodeLength) === 5 ? 5 : 6,
+        requireVerifiedPhoneForMessaging
+      };
+
+      await onUpdateSystemConfig(updatedSmsConfig);
+      setCfg(prev => ({ ...prev, ...updatedSmsConfig }));
+
+      const token = getToken();
+      await fetch('/api/v1/admin/config', {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify(updatedSmsConfig)
+      });
+
+      setSmsSaveSuccess(true);
+      setTimeout(() => setSmsSaveSuccess(false), 3000);
+    } catch (err) {
+      console.error('Error saving SMS config:', err);
+      alert('خطا در ذخیره‌سازی تنظیمات پیامک');
+    } finally {
+      setIsSavingSms(false);
+    }
+  };
+
+  const handleTestSms = async () => {
+    if (!smsTestPhone.trim()) {
+      alert('لطفاً شماره همراه جهت تست را وارد نمایید.');
+      return;
+    }
+    setIsTestingSms(true);
+    setSmsTestResult(null);
+    try {
+      const token = getToken();
+      const res = await fetch('/api/v1/admin/sms/test', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify({
+          phone: smsTestPhone.trim(),
+          smsApiKey: smsApiKey.trim(),
+          smsLineNumber: smsLineNumber.trim(),
+          smsSendMode,
+          smsPatternCode: smsPatternCode.trim(),
+          smsPatternVarName: smsPatternVarName.trim() || 'code'
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setSmsTestResult({
+          success: true,
+          simulated: data.simulated,
+          code: data.code,
+          message: data.message || 'پیامک تست با موفقیت ارسال شد.'
+        });
+      } else {
+        setSmsTestResult({
+          success: false,
+          simulated: data.simulated,
+          message: data.message || data.error || 'خطا در ارسال پیامک تست.'
+        });
+      }
+    } catch (err: any) {
+      setSmsTestResult({
+        success: false,
+        message: err.message || 'خطای شبکه در ارسال پیامک تست.'
+      });
+    } finally {
+      setIsTestingSms(false);
     }
   };
 
@@ -760,6 +952,15 @@ const handleExecutePanic = async () => {
             تنظیمات کلان سیستم
           </button>
           <button
+            onClick={() => setActiveTab('sms')}
+            className={`px-4 py-2 text-xs font-semibold rounded-xl transition-colors flex items-center gap-2 shrink-0 ${
+              activeTab === 'sms' ? 'bg-[#5288c1] text-white shadow-xs' : 'text-gray-400 hover:text-white hover:bg-[#242f3d]'
+            }`}
+          >
+            <Smartphone className="w-4 h-4 text-emerald-400" />
+            سامانه پیامک و OTP (ایران پیامک)
+          </button>
+          <button
             onClick={() => setActiveTab('branding')}
             className={`px-4 py-2 text-xs font-semibold rounded-xl transition-colors flex items-center gap-2 shrink-0 ${
               activeTab === 'branding' ? 'bg-[#5288c1] text-white shadow-xs' : 'text-gray-400 hover:text-white hover:bg-[#242f3d]'
@@ -888,6 +1089,85 @@ const handleExecutePanic = async () => {
                         cfg.allowStories ? 'translate-x-0' : '-translate-x-5'
                       }`}
                     />
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Max Upload Size Configuration Card */}
+            <div className="bg-[#0e1621] border border-[#242f3d] rounded-2xl p-5 space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-xl bg-sky-500/15 text-sky-400 flex items-center justify-center border border-sky-500/30">
+                    <HardDrive className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-gray-200">
+                      حداکثر سقف مجاز آپلود کاربران (Max Upload Size)
+                    </h3>
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      کنترل سقف حجم برای ارسال تصاویر چت، فایل‌های صوتی، استوری‌ها و آواتارها در پیام‌رسان و API
+                    </p>
+                  </div>
+                </div>
+
+                {maxUploadSaveSuccess && (
+                  <span className="text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-3 py-1 rounded-xl flex items-center gap-1.5 animate-in fade-in">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    ذخیره شد
+                  </span>
+                )}
+              </div>
+
+              <div className="p-4 bg-[#17212b] rounded-xl border border-[#242f3d] space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <label className="text-xs font-semibold text-white">حداکثر حجم فایل (مگابایت):</label>
+                    <p className="text-[11px] text-gray-400 mt-0.5">
+                      فایل‌های بزرگتر از این مقدار در کلاینت و سرور مسدود شده و خطای ۴۱۳ برمی‌گردانند.
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    <input
+                      type="number"
+                      min={1}
+                      max={100}
+                      value={maxUploadSizeMb}
+                      onChange={(e) => setMaxUploadSizeMb(Math.max(1, Math.min(100, parseInt(e.target.value) || 1)))}
+                      className="w-24 bg-[#0e1621] border border-[#242f3d] rounded-xl px-3 py-2 text-xs font-mono font-bold text-center text-white focus:outline-hidden focus:border-[#5288c1]"
+                      dir="ltr"
+                    />
+                    <span className="text-xs font-bold text-gray-300">مگابایت (MB)</span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 pt-1">
+                  {[5, 10, 15, 25, 50].map((presetMb) => (
+                    <button
+                      key={presetMb}
+                      type="button"
+                      onClick={() => setMaxUploadSizeMb(presetMb)}
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-colors ${
+                        maxUploadSizeMb === presetMb
+                          ? 'bg-[#5288c1] text-white'
+                          : 'bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white'
+                      }`}
+                    >
+                      {presetMb} مگابایت
+                    </button>
+                  ))}
+                </div>
+
+                <div className="pt-2 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={handleSaveMaxUploadSize}
+                    disabled={isSavingMaxUploadSize}
+                    className="px-5 py-2 bg-[#5288c1] hover:bg-[#4375a8] disabled:opacity-50 text-white rounded-xl text-xs font-semibold transition-all flex items-center gap-2 shadow-xs shadow-[#5288c1]/30 active:scale-95"
+                  >
+                    {isSavingMaxUploadSize ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                    <span>ذخیره سقف حجم آپلود</span>
                   </button>
                 </div>
               </div>
@@ -1051,6 +1331,382 @@ const handleExecutePanic = async () => {
           </div>
         )}
 
+        {/* Tab: SMS & OTP (Iran Payamak) Configuration */}
+        {activeTab === 'sms' && (
+          <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar">
+            
+            {/* Header & Status Card */}
+            <div className="bg-[#0e1621] border border-[#242f3d] rounded-2xl p-5 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-500/15 text-emerald-400 flex items-center justify-center shrink-0 border border-emerald-500/30">
+                    <Smartphone className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                      <span>تنظیمات درگاه پیامک ایران پیامک (Iran Payamak)</span>
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                        OTP v1.0
+                      </span>
+                    </h3>
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      ارسال کدهای تایید هویت و ورود OTP برای کاربران از طریق وب‌سرویس ایران پیامک
+                    </p>
+                  </div>
+                </div>
+
+                <a
+                  href="http://docs.iranpayamak.com/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3 py-1.5 bg-[#242f3d] hover:bg-[#2f3d4e] text-sky-400 hover:text-sky-300 rounded-xl text-xs font-semibold transition-colors flex items-center gap-1.5 shrink-0 self-start sm:self-auto border border-white/5"
+                >
+                  <ExternalLink size={13} />
+                  <span>مستندات ایران پیامک</span>
+                </a>
+              </div>
+            </div>
+
+            {/* Master Switches Section */}
+            <div className="bg-[#0e1621] border border-[#242f3d] rounded-2xl p-5 space-y-4">
+              <h3 className="text-xs font-bold text-gray-300 uppercase tracking-wider flex items-center gap-2">
+                <Sliders className="w-3.5 h-3.5 text-[#5288c1]" />
+                <span>سوئیچ‌های رفتاری و کنترل کلان OTP</span>
+              </h3>
+
+              <div className="space-y-3 pt-1">
+                {/* 1. Master OTP Toggle */}
+                <div className="p-4 bg-[#17212b] rounded-xl border border-[#242f3d] flex items-start justify-between gap-4">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <h4 className="text-sm font-semibold text-white">فعال‌سازی سیستم تایید شماره همراه با پیامک (OTP)</h4>
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${smsOtpEnabled ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30' : 'bg-gray-700 text-gray-300'}`}>
+                        {smsOtpEnabled ? 'فعال' : 'غیرفعال'}
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-400 leading-relaxed">
+                      در صورت روشن بودن، احراز هویت پیامکی فعال است و شماره کاربران از طریق پیامک اعتبارسنجی می‌شود.
+                      در صورت خاموش بودن، تایید پیامکی لغو شده و کاربران در پروفایل خود آزادانه شماره را وارد و ذخیره می‌کنند و سیستم ورود با شماره همراه در صفحه لاگین به صورت خودکار خاموش و پنهان می‌شود.
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setSmsOtpEnabled(prev => !prev)}
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-hidden ${
+                      smsOtpEnabled ? 'bg-emerald-500' : 'bg-gray-600'
+                    }`}
+                  >
+                    <span
+                      className={`inline-block h-5 w-5 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                        smsOtpEnabled ? 'translate-x-0' : '-translate-x-5'
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                {/* 2. Fallback / Simulated Mode Toggle */}
+                <div className="p-4 bg-[#17212b] rounded-xl border border-[#242f3d] flex items-start justify-between gap-4">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <h4 className="text-sm font-semibold text-white">قابلیت شبیه‌سازی و پشتیبان اضطراری (Fallback Mode)</h4>
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${smsFallbackEnabled ? 'bg-sky-500/15 text-sky-400 border border-sky-500/30' : 'bg-gray-700 text-gray-300'}`}>
+                        {smsFallbackEnabled ? 'روشن' : 'خاموش'}
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-400 leading-relaxed">
+                      در صورت روشن بودن، اگر اعتبار پنل پیامکی شما تمام شود، اطلاعات درگاه وارد نشده باشد یا وب‌سرویس پیامکی موقتاً با قطعی شبکه مواجه شود، کد تایید موقت بر روی صفحه نمایش داده می‌شود تا مانع تست و ورود کاربران نشود.
+                      در صورت خاموش بودن، پیامک فقط به طور واقعی از طریق درگاه ارسال شده و در صورت هرگونه خطا یا اتمام شارژ، خطای درگاه به کاربر بازگردانده می‌شود.
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setSmsFallbackEnabled(prev => !prev)}
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-hidden ${
+                      smsFallbackEnabled ? 'bg-sky-500' : 'bg-gray-600'
+                    }`}
+                  >
+                    <span
+                      className={`inline-block h-5 w-5 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                        smsFallbackEnabled ? 'translate-x-0' : '-translate-x-5'
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                {/* 3. Messaging Restriction Toggle */}
+                <div className="p-4 bg-[#17212b] rounded-xl border border-[#242f3d] flex items-start justify-between gap-4">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <h4 className="text-sm font-semibold text-white">محدودسازی ارسال پیام فقط برای کاربران دارای شماره تایید شده</h4>
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${requireVerifiedPhoneForMessaging ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30' : 'bg-gray-700 text-gray-300'}`}>
+                        {requireVerifiedPhoneForMessaging ? 'فعال' : 'غیرفعال'}
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-400 leading-relaxed">
+                      تنها کاربرانی که شماره همراه خود را از طریق پیامک (OTP) با موفقیت تایید کرده باشند مجاز به ارسال پیام و فایل در چت‌ها و گروه‌ها خواهند بود.
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setRequireVerifiedPhoneForMessaging(prev => !prev)}
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-hidden ${
+                      requireVerifiedPhoneForMessaging ? 'bg-amber-500' : 'bg-gray-600'
+                    }`}
+                  >
+                    <span
+                      className={`inline-block h-5 w-5 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                        requireVerifiedPhoneForMessaging ? 'translate-x-0' : '-translate-x-5'
+                      }`}
+                    />
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Iran Payamak Web Service Credentials */}
+            <div className="bg-[#0e1621] border border-[#242f3d] rounded-2xl p-5 space-y-4">
+              <h3 className="text-xs font-bold text-gray-300 uppercase tracking-wider flex items-center gap-2">
+                <Key className="w-3.5 h-3.5 text-emerald-400" />
+                <span>اطلاعات اتصال به وب‌سرویس ایران پیامک</span>
+              </h3>
+
+              {/* Mode Selection */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-gray-300">روش ارسال پیامک:</label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div
+                    onClick={() => setSmsSendMode('pattern')}
+                    className={`p-3.5 rounded-xl border cursor-pointer transition-all flex items-start gap-3 ${
+                      smsSendMode === 'pattern'
+                        ? 'bg-[#5288c1]/15 border-[#5288c1] text-white shadow-xs'
+                        : 'bg-[#17212b] border-[#242f3d] text-gray-400 hover:text-white'
+                    }`}
+                  >
+                    <div className={`w-4 h-4 rounded-full mt-0.5 border flex items-center justify-center shrink-0 ${smsSendMode === 'pattern' ? 'border-[#5288c1] bg-[#5288c1]' : 'border-gray-600'}`}>
+                      {smsSendMode === 'pattern' && <div className="w-1.5 h-1.5 bg-white rounded-full" />}
+                    </div>
+                    <div>
+                      <h5 className="text-xs font-bold text-white">ارسال با پترن / الگو (پیشنهادی)</h5>
+                      <p className="text-[11px] text-gray-400 mt-0.5 leading-relaxed">
+                        وب‌سرویس خدماتی و پرسرعت ایران پیامک؛ عبور از بلک‌لیست مخابرات و ارسال در کمتر از ۵ ثانیه.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div
+                    onClick={() => setSmsSendMode('standard')}
+                    className={`p-3.5 rounded-xl border cursor-pointer transition-all flex items-start gap-3 ${
+                      smsSendMode === 'standard'
+                        ? 'bg-[#5288c1]/15 border-[#5288c1] text-white shadow-xs'
+                        : 'bg-[#17212b] border-[#242f3d] text-gray-400 hover:text-white'
+                    }`}
+                  >
+                    <div className={`w-4 h-4 rounded-full mt-0.5 border flex items-center justify-center shrink-0 ${smsSendMode === 'standard' ? 'border-[#5288c1] bg-[#5288c1]' : 'border-gray-600'}`}>
+                      {smsSendMode === 'standard' && <div className="w-1.5 h-1.5 bg-white rounded-full" />}
+                    </div>
+                    <div>
+                      <h5 className="text-xs font-bold text-white">ارسال متنی معمولی (خط اختصاصی)</h5>
+                      <p className="text-[11px] text-gray-400 mt-0.5 leading-relaxed">
+                        ارسال متن سفارشی پیامک از طریق شماره خط اختصاصی شما در پنل ایران پیامک.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* API Key */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-gray-300 flex items-center gap-1.5">
+                  <Key className="w-3.5 h-3.5 text-gray-400" />
+                  کلید وب‌سرویس ایران پیامک (API Key / Token):
+                </label>
+                <div className="relative">
+                  <input
+                    type={showSmsApiKey ? 'text' : 'password'}
+                    value={smsApiKey}
+                    onChange={(e) => setSmsApiKey(e.target.value)}
+                    placeholder="eyJhbGciOi..."
+                    className="w-full bg-[#17212b] border border-[#242f3d] rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-hidden focus:border-[#5288c1] font-mono tracking-wider pl-10"
+                    dir="ltr"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowSmsApiKey(!showSmsApiKey)}
+                    className="absolute left-3 top-2.5 text-gray-400 hover:text-white"
+                  >
+                    {showSmsApiKey ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
+                <p className="text-[11px] text-gray-500">
+                  کلید دسترسی تولید شده در بخش وب‌سرویس پنل کاربری ایران پیامک شما.
+                </p>
+              </div>
+
+              {/* Line Number */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-gray-300 flex items-center gap-1.5">
+                  <Phone className="w-3.5 h-3.5 text-gray-400" />
+                  شماره خط ارسال‌کننده (Line Number):
+                </label>
+                <input
+                  type="text"
+                  value={smsLineNumber}
+                  onChange={(e) => setSmsLineNumber(e.target.value)}
+                  placeholder="3000..."
+                  className="w-full bg-[#17212b] border border-[#242f3d] rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-hidden focus:border-[#5288c1] font-mono"
+                  dir="ltr"
+                />
+                <p className="text-[11px] text-gray-500">
+                  شماره خط اختصاصی یا اشتراکی فعال شما در ایران پیامک (در حالت پترن در صورت خالی بودن، خط پیش‌فرض پترن استفاده می‌شود).
+                </p>
+              </div>
+
+              {/* Pattern Specific Fields */}
+              {smsSendMode === 'pattern' && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4 bg-[#17212b] rounded-xl border border-[#242f3d]">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-gray-300">کد پترن / قالب (Pattern Code):</label>
+                    <input
+                      type="text"
+                      value={smsPatternCode}
+                      onChange={(e) => setSmsPatternCode(e.target.value)}
+                      placeholder="مثال: 1234"
+                      className="w-full bg-[#0e1621] border border-[#242f3d] rounded-xl px-3.5 py-2 text-xs text-white focus:outline-hidden focus:border-[#5288c1] font-mono"
+                      dir="ltr"
+                    />
+                    <p className="text-[10px] text-gray-500">شناسه الگوی تایید شده در پنل ایران پیامک</p>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-gray-300">نام متغیر در پترن (Variable Name):</label>
+                    <input
+                      type="text"
+                      value={smsPatternVarName}
+                      onChange={(e) => setSmsPatternVarName(e.target.value)}
+                      placeholder="code"
+                      className="w-full bg-[#0e1621] border border-[#242f3d] rounded-xl px-3.5 py-2 text-xs text-white focus:outline-hidden focus:border-[#5288c1] font-mono"
+                      dir="ltr"
+                    />
+                    <p className="text-[10px] text-gray-500">نام متغیر تعریف شده در الگو (مثلاً code یا otp)</p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Complementary OTP Parameters */}
+            <div className="bg-[#0e1621] border border-[#242f3d] rounded-2xl p-5 space-y-4">
+              <h3 className="text-xs font-bold text-gray-300 uppercase tracking-wider flex items-center gap-2">
+                <Clock className="w-3.5 h-3.5 text-amber-400" />
+                <span>تنظیمات تکمیلی کد تایید (طول کد و مدت اعتبار)</span>
+              </h3>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-gray-300">طول ارقام کد OTP:</label>
+                  <select
+                    value={otpCodeLength}
+                    onChange={(e) => setOtpCodeLength(Number(e.target.value))}
+                    className="w-full bg-[#17212b] border border-[#242f3d] rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-hidden focus:border-[#5288c1]"
+                  >
+                    <option value={6}>۶ رقم (استاندارد امنیتی بالا)</option>
+                    <option value={5}>۵ رقم</option>
+                  </select>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-gray-300">مدت زمان اعتبار کد تایید:</label>
+                  <select
+                    value={otpExpiresInMinutes}
+                    onChange={(e) => setOtpExpiresInMinutes(Number(e.target.value))}
+                    className="w-full bg-[#17212b] border border-[#242f3d] rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-hidden focus:border-[#5288c1]"
+                  >
+                    <option value={1}>۱ دقیقه</option>
+                    <option value={2}>۲ دقیقه (پیش‌فرض استاندارد)</option>
+                    <option value={3}>۳ دقیقه</option>
+                    <option value={5}>۵ دقیقه</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Save Button */}
+              <div className="pt-2">
+                <button
+                  type="button"
+                  onClick={handleSaveSmsConfig}
+                  disabled={isSavingSms}
+                  className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-2 shadow-md shadow-emerald-600/20 active:scale-95"
+                >
+                  {isSavingSms ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                  <span>{smsSaveSuccess ? 'تنظیمات پیامک ذخیره شد!' : 'ذخیره تنظیمات درگاه پیامک و OTP'}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Live SMS Testing Tool */}
+            <div className="bg-[#0e1621] border border-sky-500/30 rounded-2xl p-5 space-y-4">
+              <div className="flex items-center gap-2 text-sky-400 font-semibold text-sm">
+                <Send className="w-4 h-4" />
+                <span>ابزار ارسال پیامک تست زنده</span>
+              </div>
+              <p className="text-xs text-gray-400 leading-relaxed">
+                جهت اطمینان از صحت کلید API، کد پترن و اتصال به سامانه ایران پیامک، یک پیامک آزمایشی به شماره مورد نظر خود ارسال کنید.
+              </p>
+
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+                <div className="relative flex-1">
+                  <input
+                    type="text"
+                    value={smsTestPhone}
+                    onChange={(e) => setSmsTestPhone(e.target.value)}
+                    placeholder="09121234567"
+                    className="w-full bg-[#17212b] border border-[#242f3d] rounded-xl px-4 py-2.5 text-xs text-white focus:outline-hidden focus:border-sky-400 font-mono tracking-wider text-right"
+                    dir="ltr"
+                  />
+                  <Smartphone className="w-4 h-4 text-gray-500 absolute left-3.5 top-3" />
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleTestSms}
+                  disabled={isTestingSms || !smsTestPhone.trim()}
+                  className="px-5 py-2.5 bg-sky-600 hover:bg-sky-500 disabled:opacity-40 text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 shrink-0 shadow-sm active:scale-95"
+                >
+                  {isTestingSms ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4 -rotate-45" />}
+                  <span>{isTestingSms ? 'در حال ارسال تست...' : 'ارسال پیامک آزمایشی'}</span>
+                </button>
+              </div>
+
+              {smsTestResult && (
+                <div
+                  className={`p-3.5 rounded-xl text-xs border flex flex-col gap-1.5 animate-in fade-in duration-200 ${
+                    smsTestResult.success
+                      ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300'
+                      : 'bg-rose-500/15 border-rose-500/30 text-rose-300'
+                  }`}
+                >
+                  <div className="flex items-center gap-2 font-bold">
+                    {smsTestResult.success ? (
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                    ) : (
+                      <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+                    )}
+                    <span>{smsTestResult.message}</span>
+                  </div>
+                  {smsTestResult.code && (
+                    <div className="text-[11px] text-gray-300 font-mono bg-black/30 p-2 rounded-lg mt-1" dir="ltr">
+                      کد تایید ارسال شده: {smsTestResult.code} {smsTestResult.simulated && '(حالت شبیه‌سازی fallback)'}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+          </div>
+        )}
+
         {/* Tab: Branding & Identity Customization */}
         {activeTab === 'branding' && (
           <div className="flex-1 overflow-y-auto p-6 space-y-6">
@@ -1110,32 +1766,94 @@ const handleExecutePanic = async () => {
                   />
                 </div>
 
-                {/* Full Logo URL */}
+                {/* Full Logo URL & Upload */}
                 <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-gray-300">نشانی لوگوی کامل (Full Logo URL):</label>
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-semibold text-gray-300">لوگوی کامل اصلی (Full Logo):</label>
+                    {customLogoUrl && (
+                      <button
+                        type="button"
+                        onClick={() => setCustomLogoUrl('')}
+                        className="text-[10px] text-red-400 hover:text-red-300 transition-colors"
+                      >
+                        بازنشانی به پیش‌فرض
+                      </button>
+                    )}
+                  </div>
                   <input
-                    type="text"
-                    value={customLogoUrl}
-                    onChange={(e) => setCustomLogoUrl(e.target.value)}
-                    placeholder="پیش‌فرض: /assets/aistudio/...png"
-                    dir="ltr"
-                    className="w-full bg-[#17212b] border border-[#242f3d] rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-gray-500 focus:outline-hidden focus:border-[#5288c1] font-mono text-left"
+                    type="file"
+                    ref={fileInputRefLogo}
+                    onChange={handleLogoUpload}
+                    accept="image/png,image/svg+xml,image/webp,image/jpeg"
+                    className="hidden"
                   />
-                  <p className="text-[11px] text-gray-400">لوگوی افقی با عنوان برای صفحه ورود و بارگذاری.</p>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={customLogoUrl}
+                      onChange={(e) => setCustomLogoUrl(e.target.value)}
+                      placeholder="پیش‌فرض: /assets/aistudio/...png یا آپلود فایل"
+                      dir="ltr"
+                      className="flex-1 bg-[#17212b] border border-[#242f3d] rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-gray-500 focus:outline-hidden focus:border-[#5288c1] font-mono text-left"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => fileInputRefLogo.current?.click()}
+                      className="px-3.5 py-2.5 bg-[#242f3d] hover:bg-[#2f3d4e] border border-white/5 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 shrink-0 transition-colors active:scale-95"
+                      title="آپلود تصویر لوگو از دستگاه با حفظ شفافیت کامل"
+                    >
+                      <Upload size={14} className="text-sky-400" />
+                      <span>انتخاب فایل</span>
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-gray-400">
+                    تصاویر بدون بک‌گراند (PNG / SVG) شفافیت کامل خود را بدون اضافه شدن پس‌زمینه سفید حفظ می‌کنند.
+                  </p>
                 </div>
 
-                {/* Minimal Symbol URL */}
+                {/* Minimal Symbol URL & Upload */}
                 <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-gray-300">نشانی آیکون مینیمال (Symbol Icon URL):</label>
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-semibold text-gray-300">آیکون و نماد مینیمال (Symbol Icon):</label>
+                    {customSymbolUrl && (
+                      <button
+                        type="button"
+                        onClick={() => setCustomSymbolUrl('')}
+                        className="text-[10px] text-red-400 hover:text-red-300 transition-colors"
+                      >
+                        بازنشانی به پیش‌فرض
+                      </button>
+                    )}
+                  </div>
                   <input
-                    type="text"
-                    value={customSymbolUrl}
-                    onChange={(e) => setCustomSymbolUrl(e.target.value)}
-                    placeholder="پیش‌فرض: /assets/aistudio/starchat-minimal.png"
-                    dir="ltr"
-                    className="w-full bg-[#17212b] border border-[#242f3d] rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-gray-500 focus:outline-hidden focus:border-[#5288c1] font-mono text-left"
+                    type="file"
+                    ref={fileInputRefSymbol}
+                    onChange={handleSymbolUpload}
+                    accept="image/png,image/svg+xml,image/webp,image/jpeg"
+                    className="hidden"
                   />
-                  <p className="text-[11px] text-gray-400">آیکون دوحبابی ستاره بدون نوشته برای فاویکون و هدرها.</p>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={customSymbolUrl}
+                      onChange={(e) => setCustomSymbolUrl(e.target.value)}
+                      placeholder="پیش‌فرض: /assets/aistudio/starchat-minimal.png"
+                      dir="ltr"
+                      className="flex-1 bg-[#17212b] border border-[#242f3d] rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-gray-500 focus:outline-hidden focus:border-[#5288c1] font-mono text-left"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => fileInputRefSymbol.current?.click()}
+                      className="px-3.5 py-2.5 bg-[#242f3d] hover:bg-[#2f3d4e] border border-white/5 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 shrink-0 transition-colors active:scale-95"
+                      title="آپلود تصویر نماد از دستگاه با حفظ شفافیت کامل"
+                    >
+                      <Upload size={14} className="text-sky-400" />
+                      <span>انتخاب فایل</span>
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-gray-400">
+                    آیکون ستاره بدون نوشته برای فاویکون، سربرگ‌ها و تب خالی. حفظ شفافیت ۱۰۰٪ بدون کادر سفید.
+                  </p>
                 </div>
               </div>
 

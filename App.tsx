@@ -683,14 +683,13 @@ const App: React.FC = () => {
           break;
 
         case 'updateChatInfo': {
-          const updateData: any = {
-            groupName: payload.groupName,
-            description: payload.description,
-            groupAvatar: payload.groupAvatar,
-            isPublic: payload.isPublic,
-            publicHandle: payload.publicHandle,
-            slowMode: payload.slowMode
-          };
+          const updateData: any = {};
+          if (payload.groupName !== undefined) updateData.groupName = payload.groupName;
+          if (payload.description !== undefined) updateData.description = payload.description;
+          if (payload.groupAvatar !== undefined) updateData.groupAvatar = payload.groupAvatar;
+          if (payload.isPublic !== undefined) updateData.isPublic = payload.isPublic;
+          if (payload.publicHandle !== undefined) updateData.publicHandle = payload.publicHandle;
+          if (payload.slowMode !== undefined) updateData.slowMode = payload.slowMode;
           if (payload.permissions !== undefined) updateData.permissions = payload.permissions;
           if (payload.reactionsSetting !== undefined) updateData.reactionsSetting = payload.reactionsSetting;
           if (payload.allowedReactions !== undefined) updateData.allowedReactions = payload.allowedReactions;
@@ -1226,6 +1225,7 @@ const App: React.FC = () => {
       {showMyProfile && (
         <MyProfileModal
           user={currentUser}
+          systemConfig={systemConfig}
           onClose={() => setShowMyProfile(false)}
           onUpdateUser={async (updatedData) => {
             const updated = { ...currentUser, ...updatedData };
@@ -1241,6 +1241,7 @@ const App: React.FC = () => {
       {showCreateStory && (
         <CreateStoryModal
           currentUser={currentUser}
+          systemConfig={systemConfig}
           onClose={() => setShowCreateStory(false)}
           onSubmitStory={async (mediaUrl, caption, durationHours, mediaType = 'image', durationSeconds = 5) => {
             const storyId = `story_${Date.now()}`;

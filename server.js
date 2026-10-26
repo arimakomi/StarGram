@@ -683,6 +683,335 @@ app.post('/api/auth/login', wrap(async (req, res) => {
   res.json({ success: true, token: await createSession(username, req.get('user-agent')), user: publicUser(user) });
 }));
 
+// ───────────── سامانه پیامک و احراز هویت با کد یک‌بار مصرف (OTP - ایران پیامک) ─────────────
+function normalizeIranPhone(raw) {
+  if (!raw || typeof raw !== 'string') return '';
+  const persianDigits = ['۰', '۱', '۲', '۳', '۴', '۵', '۶', '۷', '۸', '۹'];
+  const arabicDigits = ['٠', '١', '٢', '٣', '٤', '٥', '٦', '٧', '٨', '٩'];
+  let cleaned = raw.trim();
+  for (let i = 0; i < 10; i++) {
+    cleaned = cleaned.replaceAll(persianDigits[i], String(i)).replaceAll(arabicDigits[i], String(i));
+  }
+  cleaned = cleaned.replace(/[^0-9+]/g, '');
+  if (cleaned.startsWith('+98')) cleaned = '0' + cleaned.slice(3);
+  else if (cleaned.startsWith('0098')) cleaned = '0' + cleaned.slice(4);
+  else if (cleaned.startsWith('98')) cleaned = '0' + cleaned.slice(2);
+  else if (cleaned.startsWith('9') && cleaned.length === 10) cleaned = '0' + cleaned;
+
+  if (/^09\d{9}$/.test(cleaned)) {
+    return cleaned;
+  }
+  return '';
+}
+
+const otpStore = new Map(); // phone -> { code, expiresAt, sentAt, attempts }
+const OTP_TTL = 120 * 1000; // 2 minutes
+
+async function findUserByPhone(phone) {
+  const norm = normalizeIranPhone(phone);
+  if (!norm) return null;
+  const docs = await dbAdapter.getCollectionDocs('users');
+  for (const row of docs) {
+    if (row.deleted) continue;
+    const u = typeof row.data === 'string' ? JSON.parse(row.data) : row.data;
+    if (u && normalizeIranPhone(u.phone) === norm) {
+      return u;
+    }
+  }
+  return null;
+}
+
+async function sendIranPayamakSms({ phone, code, config }) {
+  const apiKey = config?.smsApiKey || process.env.IRANPAYAMAK_API_KEY;
+  const lineNumber = config?.smsLineNumber || process.env.IRANPAYAMAK_LINE_NUMBER;
+  const sendMode = config?.smsSendMode || 'pattern';
+  const patternCode = config?.smsPatternCode || process.env.IRANPAYAMAK_PATTERN_CODE;
+  const varName = config?.smsPatternVarName || 'code';
+  const fallbackEnabled = config?.smsFallbackEnabled !== false; // default true
+
+  if (!apiKey) {
+    if (!fallbackEnabled) {
+      return { success: false, simulated: false, error: 'اطلاعات درگاه پیامک (توکن API) در سیستم تنظیم نشده است.' };
+    }
+    console.log(`[SMS-DEV-SIMULATED] IranPayamak credentials unconfigured. Code for ${phone}: ${code}`);
+    return { success: true, simulated: true, code, message: 'کد تایید شبیه‌سازی شد (تنظیمات پنل پیامک هنوز تکمیل نشده است)' };
+  }
+
+  try {
+    if (sendMode === 'pattern' && patternCode) {
+      const payload = {
+        code: patternCode,
+        attributes: {
+          [varName]: String(code)
+        },
+        recipient: phone,
+        line_number: lineNumber || undefined
+      };
+      const res = await fetch('https://api.iranpayamak.com/ws/v1/sms/pattern', {
+        method: 'POST',
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+          'Api-Key': apiKey
+        },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        console.warn('IranPayamak pattern send error:', res.status, data);
+        if (!fallbackEnabled) {
+          return { success: false, simulated: false, error: data?.message || 'خطا در ارسال پیامک از طریق سامانه ایران پیامک' };
+        }
+        return { success: true, simulated: true, code, error: data?.message || 'خطا در ارتباط با سامانه ایران پیامک', message: `ارسال پیامک با خطا مواجه شد؛ کد موقت جهت تست: ${code}` };
+      }
+      return { success: true, simulated: false, data, message: 'کد تایید با موفقیت پیامک شد.' };
+    } else {
+      const text = `کد تایید شما در استارچت: ${code}`;
+      const payload = {
+        recipients: [phone],
+        message: text,
+        line_number: lineNumber
+      };
+      const res = await fetch('https://api.iranpayamak.com/ws/v1/sms/send', {
+        method: 'POST',
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+          'Api-Key': apiKey
+        },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        console.warn('IranPayamak standard send error:', res.status, data);
+        if (!fallbackEnabled) {
+          return { success: false, simulated: false, error: data?.message || 'خطا در ارسال پیامک از طریق سامانه ایران پیامک' };
+        }
+        return { success: true, simulated: true, code, error: data?.message || 'خطا در ارسال پیامک', message: `ارسال پیامک با خطا مواجه شد؛ کد موقت جهت تست: ${code}` };
+      }
+      return { success: true, simulated: false, data, message: 'کد تایید با موفقیت پیامک شد.' };
+    }
+  } catch (err) {
+    console.warn('IranPayamak network error:', err);
+    if (!fallbackEnabled) {
+      return { success: false, simulated: false, error: err.message || 'خطای شبکه در ارتباط با وب‌سرویس پیامک' };
+    }
+    return { success: true, simulated: true, code, error: err.message, message: `خطای شبکه در ارسال پیامک؛ کد موقت: ${code}` };
+  }
+}
+
+// استعلام شماره همراه (بررسی تکراری نبودن)
+app.get('/api/users/check-phone/:phone', wrap(async (req, res) => {
+  const norm = normalizeIranPhone(req.params.phone);
+  if (!norm) return res.status(400).json({ success: false, available: false, message: 'فرمت شماره همراه نامعتبر است (مثال: 09121234567).' });
+  const existing = await findUserByPhone(norm);
+  const excludeUserId = req.query.excludeUserId;
+  if (existing && existing.id !== excludeUserId) {
+    return res.json({ success: true, available: false, message: 'این شماره همراه قبلاً توسط کاربر دیگری ثبت شده است.' });
+  }
+  res.json({ success: true, available: true, message: 'شماره همراه مجاز و آزاد است.' });
+}));
+
+// ارسال کد OTP
+app.post(['/api/sms/send-otp', '/api/v1/sms/send-otp'], wrap(async (req, res) => {
+  const rawPhone = req.body?.phone;
+  const purpose = req.body?.purpose || 'login'; // 'login' | 'verify'
+  const excludeUserId = req.body?.userId;
+
+  const sysCfg = await dbAdapter.getDoc('system_config', 'main') || {};
+  if (sysCfg.smsOtpEnabled === false) {
+    return res.status(400).json({ success: false, message: 'احراز هویت پیامکی (OTP) در حال حاضر توسط مدیریت غیرفعال شده است.' });
+  }
+
+  const phone = normalizeIranPhone(rawPhone);
+  if (!phone) {
+    return res.status(400).json({ success: false, message: 'شماره همراه نامعتبر است. شماره باید با 09 آغاز شده و ۱۱ رقم باشد.' });
+  }
+
+  // بررسی تکراری نبودن در حالت verify
+  if (purpose === 'verify') {
+    const existing = await findUserByPhone(phone);
+    if (existing && existing.id !== excludeUserId) {
+      return res.status(409).json({ success: false, message: 'این شماره همراه قبلاً برای کاربر دیگری در سیستم ثبت و تایید شده است.' });
+    }
+  }
+
+  // محدودیت ارسال مجدد (حداقل ۶۰ ثانیه فاصله)
+  const existingOtp = otpStore.get(phone);
+  const now = Date.now();
+  if (existingOtp && (now - existingOtp.sentAt < 60 * 1000)) {
+    const remainSec = Math.ceil((60 * 1000 - (now - existingOtp.sentAt)) / 1000);
+    return res.status(429).json({ success: false, message: `لطفاً ${remainSec} ثانیه صبر کرده و سپس مجدداً تلاش نمایید.` });
+  }
+
+  const codeLength = sysCfg.otpCodeLength === 5 ? 5 : 6;
+  const minNum = codeLength === 5 ? 10000 : 100000;
+  const maxNum = codeLength === 5 ? 90000 : 900000;
+  const code = Math.floor(minNum + Math.random() * maxNum).toString();
+  const ttlMs = (Number(sysCfg.otpExpiresInMinutes) || 2) * 60 * 1000;
+
+  const smsResult = await sendIranPayamakSms({ phone, code, config: sysCfg });
+  if (!smsResult.success) {
+    return res.status(500).json({ success: false, message: smsResult.error || 'خطا در ارسال پیامک از طریق درگاه.' });
+  }
+
+  otpStore.set(phone, {
+    code,
+    expiresAt: now + ttlMs,
+    sentAt: now,
+    attempts: 0
+  });
+
+  res.json({
+    success: true,
+    message: smsResult.message || 'کد تایید ارسال شد.',
+    simulated: smsResult.simulated,
+    simulatedOtp: smsResult.simulated ? code : undefined,
+    expiresInSeconds: Math.round(ttlMs / 1000)
+  });
+}));
+
+// بررسی و تایید کد OTP (برای ورود یا تایید شماره در پروفایل)
+app.post(['/api/sms/verify-otp', '/api/v1/sms/verify-otp'], wrap(async (req, res) => {
+  const rawPhone = req.body?.phone;
+  const code = String(req.body?.code || '').trim();
+  const purpose = req.body?.purpose || 'login'; // 'login' | 'verify'
+  const userId = req.body?.userId;
+
+  const phone = normalizeIranPhone(rawPhone);
+  if (!phone) return res.status(400).json({ success: false, message: 'شماره همراه نامعتبر است.' });
+  if (!code || code.length < 5) return res.status(400).json({ success: false, message: 'کد تایید وارد نشده یا ناقص است.' });
+
+  const record = otpStore.get(phone);
+  const now = Date.now();
+
+  if (!record) {
+    return res.status(400).json({ success: false, message: 'کد تایید یافت نشد. لطفاً مجدداً درخواست ارسال کد دهید.' });
+  }
+
+  if (now > record.expiresAt) {
+    otpStore.delete(phone);
+    return res.status(400).json({ success: false, message: 'کد تایید منقضی شده است. لطفاً کد جدید دریافت کنید.' });
+  }
+
+  if (record.code !== code) {
+    record.attempts = (record.attempts || 0) + 1;
+    if (record.attempts >= 5) {
+      otpStore.delete(phone);
+      return res.status(400).json({ success: false, message: 'تعداد دفعات اشتباه بیش از حد مجاز بود. کد منقضی شد.' });
+    }
+    return res.status(400).json({ success: false, message: 'کد تایید وارد شده نادرست است.' });
+  }
+
+  // کد صحیح بود؛ پاک کردن از حافظه موقت
+  otpStore.delete(phone);
+
+  if (purpose === 'verify') {
+    // تایید شماره در پروفایل کاربر جاری
+    if (!userId) return res.status(400).json({ success: false, message: 'شناسه کاربر الزامی است.' });
+    const user = await dbAdapter.getDoc('users', userId);
+    if (!user) return res.status(404).json({ success: false, message: 'کاربر یافت نشد.' });
+
+    // تایید عدم تکراری بودن مجدد
+    const duplicate = await findUserByPhone(phone);
+    if (duplicate && duplicate.id !== userId) {
+      return res.status(409).json({ success: false, message: 'این شماره همراه به نام کاربر دیگری در سیستم ثبت شده است.' });
+    }
+
+    user.phone = phone;
+    user.isPhoneVerified = true;
+    await dbAdapter.putDoc('users', userId, user, now);
+    return res.json({ success: true, message: 'شماره همراه با موفقیت تایید و ثبت شد.', user: publicUser(user) });
+  }
+
+  // حالت ورود با OTP (purpose === 'login')
+  let existingUser = await findUserByPhone(phone);
+
+  if (!existingUser) {
+    // کاربر با این شماره همراه هنوز حساب ندارد
+    const desiredUsername = normUser(req.body?.username);
+    const desiredDisplayName = String(req.body?.displayName || '').trim().slice(0, 60);
+
+    if (!desiredUsername) {
+      // به کلاینت اطلاع می‌دهیم که شماره تایید شد اما برای تکمیل ساخت حساب نام و یوزرنیم نیاز است
+      return res.json({
+        success: true,
+        isNewUser: true,
+        phone,
+        message: 'کد تایید شد. لطفاً نام و نام کاربری دلخواه خود را وارد کنید.'
+      });
+    }
+
+    if (!validUsername(desiredUsername)) {
+      return res.status(400).json({ success: false, message: 'نام کاربری نامعتبر است (حداقل ۳ کاراکتر بدون فاصله).' });
+    }
+
+    if (await dbAdapter.getDoc('users', desiredUsername)) {
+      return res.status(409).json({ success: false, message: 'این نام کاربری قبلاً توسط کاربر دیگری گرفته شده است.' });
+    }
+
+    // ساخت کاربر جدید با شماره تایید شده
+    const newUser = {
+      id: desiredUsername,
+      username: desiredUsername,
+      displayName: desiredDisplayName || desiredUsername,
+      phone,
+      isPhoneVerified: true,
+      status: 'online',
+      lastSeen: now,
+      role: 'user',
+      theme: 'night',
+      wallpaper: 'default',
+      contacts: [],
+      privacy: { showStatus: 'all', showAvatar: 'all' }
+    };
+    await dbAdapter.putDoc('users', desiredUsername, newUser, now);
+    existingUser = newUser;
+  }
+
+  if (existingUser.isBanned) {
+    if (existingUser.bannedUntil && existingUser.bannedUntil < now) {
+      existingUser.isBanned = false; delete existingUser.bannedUntil; delete existingUser.banReason;
+    } else {
+      return res.status(403).json({ success: false, message: existingUser.banReason ? `حساب شما مسدود شده است: ${existingUser.banReason}` : 'حساب شما مسدود است.' });
+    }
+  }
+
+  existingUser.phone = phone;
+  existingUser.isPhoneVerified = true;
+  existingUser.lastSeen = now;
+  existingUser.status = 'online';
+  await dbAdapter.putDoc('users', existingUser.id, existingUser, now);
+
+  const token = await createSession(existingUser.id, req.get('user-agent'));
+  res.json({
+    success: true,
+    message: 'ورود با موفقیت انجام شد.',
+    token,
+    user: publicUser(existingUser)
+  });
+}));
+
+// تست ارسال پیامک در پنل ادمین
+app.post(['/api/admin/sms/test', '/api/v1/admin/sms/test'], auth, wrap(async (req, res) => {
+  if (!isAdmin(req.user)) return res.status(403).json({ success: false, message: 'فقط مدیر سیستم مجاز به تست سامانه پیامک است.' });
+  const rawPhone = req.body?.phone;
+  const phone = normalizeIranPhone(rawPhone);
+  if (!phone) return res.status(400).json({ success: false, message: 'شماره همراه برای تست نامعتبر است.' });
+
+  const testConfig = {
+    smsApiKey: req.body?.smsApiKey,
+    smsLineNumber: req.body?.smsLineNumber,
+    smsSendMode: req.body?.smsSendMode || 'pattern',
+    smsPatternCode: req.body?.smsPatternCode,
+    smsPatternVarName: req.body?.smsPatternVarName || 'code'
+  };
+
+  const code = Math.floor(100000 + Math.random() * 900000).toString();
+  const result = await sendIranPayamakSms({ phone, code, config: testConfig });
+  res.json(result);
+}));
+
 // ───────────── احراز هویت توکن‌های API و نشست‌های کاربران ─────────────
 async function findApiToken(tokenStr, now) {
   if (!tokenStr || typeof tokenStr !== 'string' || tokenStr.length < 20) return null;
@@ -1188,7 +1517,9 @@ app.patch('/api/v1/admin/config', auth, wrap(async (req, res) => {
   const allowed = [
     'appName', 'appSlogan', 'welcomeMessage', 'loginBannerUrl', 'customLogoUrl', 'customSymbolUrl', 'accentColor',
     'allowRegistration', 'allowGroupCreation', 'allowChannelCreation', 'allowPublicChannels', 'allowStories',
-    'geminiEnabled', 'geminiApiKey', 'geminiProxyUrl', 'geminiModel'
+    'geminiEnabled', 'geminiApiKey', 'geminiProxyUrl', 'geminiModel',
+    'smsProvider', 'smsApiKey', 'smsLineNumber', 'smsSendMode', 'smsPatternCode', 'smsPatternVarName', 'requireVerifiedPhoneForMessaging',
+    'smsOtpEnabled', 'smsFallbackEnabled', 'otpExpiresInMinutes', 'otpCodeLength', 'maxUploadSizeMb'
   ];
 
   for (const k of allowed) {
@@ -1309,7 +1640,18 @@ app.patch('/api/v1/users/:id', auth, wrap(async (req, res) => {
   if (body.displayName) user.displayName = String(body.displayName).trim().slice(0, 60);
   if (body.bio !== undefined) user.bio = String(body.bio).slice(0, 300);
   if (body.phone !== undefined) user.phone = String(body.phone).slice(0, 30);
-  if (body.avatar !== undefined) user.avatar = body.avatar;
+  if (body.avatar !== undefined) {
+    const sysConfig = await dbAdapter.getDoc('system_config', 'main') || {};
+    const maxMb = Number(sysConfig.maxUploadSizeMb) || 15;
+    const maxBytes = maxMb * 1024 * 1024;
+    if (typeof body.avatar === 'string' && body.avatar.length > maxBytes * 1.37) {
+      return res.status(413).json({
+        success: false,
+        message: `حجم تصویر آواتار فراتر از سقف مجاز تعیین شده توسط مدیریت (${maxMb} مگابایت) است.`
+      });
+    }
+    user.avatar = body.avatar;
+  }
   if (body.wallpaper !== undefined) user.wallpaper = body.wallpaper;
   if (body.theme && ['day', 'night', 'oled', 'arctic'].includes(body.theme)) user.theme = body.theme;
 
@@ -1442,6 +1784,18 @@ app.post('/api/v1/chats/:id/messages', auth, wrap(async (req, res) => {
   const { text = '', imageUrl, audioUrl, poll, replyToId } = req.body || {};
   if (!text && !imageUrl && !audioUrl && !poll) {
     return res.status(400).json({ success: false, message: 'محتوای پیام (متن، تصویر، صدا یا نظرسنجی) الزامی است.' });
+  }
+
+  // بررسی حداکثر حجم مجاز آپلود تعیین‌شده در تنظیمات سیستم
+  const sysConfig = await dbAdapter.getDoc('system_config', 'main') || {};
+  const maxMb = Number(sysConfig.maxUploadSizeMb) || 15;
+  const maxBytes = maxMb * 1024 * 1024;
+  const mediaPayload = (imageUrl || '') + (audioUrl || '');
+  if (mediaPayload && mediaPayload.length > maxBytes * 1.37) {
+    return res.status(413).json({
+      success: false,
+      message: `حجم رسانه ارسالی فراتر از حداکثر مجاز تعیین شده توسط مدیریت (${maxMb} مگابایت) است.`
+    });
   }
 
   const now = Date.now();
