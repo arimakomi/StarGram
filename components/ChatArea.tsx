@@ -122,13 +122,24 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   const [forwardSuccessToast, setForwardSuccessToast] = useState<string | null>(null);
   
   // Right-Click & Mobile Long-Press Context Menu State
+  const [copyToast, setCopyToast] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<{
     x: number;
     y: number;
     message: Message;
+    targetRect: {
+      top: number;
+      left: number;
+      width: number;
+      height: number;
+      bottom: number;
+      right: number;
+    };
+    placement: 'above' | 'below';
   } | null>(null);
-  const touchTimerRef = useRef<any>(null);
+  const longPressTimerRef = useRef<any>(null);
   const touchStartPosRef = useRef<{ x: number; y: number } | null>(null);
+  const isLongPressActiveRef = useRef<boolean>(false);
 
   // Voice Recording State
   const [isRecording, setIsRecording] = useState(false);
@@ -685,24 +696,68 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     setReplyingTo(null);
   };
 
-  // Context Menu Handlers (Desktop Right-Click & Mobile Long-Press)
+  // Context Menu Handlers (Desktop Right-Click & Mobile Long-Press with Telegram-Style Focus)
+  const openFocusedContextMenu = (targetEl: HTMLElement, msg: Message) => {
+    const rect = targetEl.getBoundingClientRect();
+    const isMe = msg.senderId === currentUser.id;
+    const menuWidth = 232;
+    const estimatedMenuHeight = 310;
+    
+    // Vertical placement (above vs below bubble)
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const spaceAbove = rect.top;
+    let placement: 'above' | 'below' = 'below';
+    let y = rect.bottom + 8;
+
+    if (spaceBelow < estimatedMenuHeight && spaceAbove >= estimatedMenuHeight) {
+      placement = 'above';
+      y = Math.max(12, rect.top - estimatedMenuHeight - 8);
+    } else if (spaceBelow < estimatedMenuHeight && spaceAbove < estimatedMenuHeight) {
+      placement = spaceBelow >= spaceAbove ? 'below' : 'above';
+      y = Math.max(12, Math.min(window.innerHeight - estimatedMenuHeight - 12, spaceBelow >= spaceAbove ? rect.bottom + 6 : rect.top - estimatedMenuHeight - 6));
+    }
+
+    // Horizontal placement aligned with message bubble
+    let x = isMe ? (rect.right - menuWidth) : rect.left;
+    x = Math.max(12, Math.min(window.innerWidth - menuWidth - 12, x));
+
+    setContextMenu({
+      x,
+      y,
+      message: msg,
+      targetRect: {
+        top: rect.top,
+        left: rect.left,
+        width: rect.width,
+        height: rect.height,
+        bottom: rect.bottom,
+        right: rect.right
+      },
+      placement
+    });
+  };
+
   const handleContextMenu = (e: React.MouseEvent, msg: Message) => {
     e.preventDefault();
-    const x = Math.min(e.clientX, window.innerWidth - 240);
-    const y = Math.min(e.clientY, window.innerHeight - 340);
-    setContextMenu({ x, y, message: msg });
+    e.stopPropagation();
+    const targetEl = e.currentTarget as HTMLElement;
+    openFocusedContextMenu(targetEl, msg);
   };
 
   const handleTouchStart = (e: React.TouchEvent, msg: Message) => {
     const touch = e.touches[0];
     touchStartPosRef.current = { x: touch.clientX, y: touch.clientY };
-    if (touchTimerRef.current) clearTimeout(touchTimerRef.current);
-    touchTimerRef.current = setTimeout(() => {
-      if (navigator.vibrate) navigator.vibrate(40);
-      const x = Math.min(touch.clientX, window.innerWidth - 240);
-      const y = Math.min(touch.clientY, window.innerHeight - 340);
-      setContextMenu({ x, y, message: msg });
-    }, 480);
+    isLongPressActiveRef.current = false;
+    if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+
+    const targetEl = e.currentTarget as HTMLElement;
+    longPressTimerRef.current = setTimeout(() => {
+      isLongPressActiveRef.current = true;
+      if (typeof navigator !== 'undefined' && navigator.vibrate) {
+        try { navigator.vibrate(35); } catch {}
+      }
+      openFocusedContextMenu(targetEl, msg);
+    }, 320);
   };
 
   const handleTouchMove = (e: React.TouchEvent) => {
@@ -710,13 +765,35 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     const touch = e.touches[0];
     const dx = Math.abs(touch.clientX - touchStartPosRef.current.x);
     const dy = Math.abs(touch.clientY - touchStartPosRef.current.y);
-    if (dx > 10 || dy > 10) {
-      if (touchTimerRef.current) clearTimeout(touchTimerRef.current);
+    // Allow up to 16px micro-jitter before canceling long-press
+    if (dx > 16 || dy > 16) {
+      if (longPressTimerRef.current) {
+        clearTimeout(longPressTimerRef.current);
+        longPressTimerRef.current = null;
+      }
     }
   };
 
-  const handleTouchEnd = () => {
-    if (touchTimerRef.current) clearTimeout(touchTimerRef.current);
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+    if (isLongPressActiveRef.current) {
+      e.preventDefault();
+      e.stopPropagation();
+      isLongPressActiveRef.current = false;
+    }
+    touchStartPosRef.current = null;
+  };
+
+  const handleTouchCancel = () => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+    isLongPressActiveRef.current = false;
+    touchStartPosRef.current = null;
   };
 
   const renderMessageText = (text: string) => {
@@ -750,6 +827,272 @@ const ChatArea: React.FC<ChatAreaProps> = ({
       return false;
     }
     return true;
+  };
+
+  // Reusable Message Bubble Content Renderer (used in feed and in the focused context overlay)
+  const renderMessageBubbleContent = (msg: Message, options?: { isFocusedOverlay?: boolean }) => {
+    const isMe = msg.senderId === currentUser.id;
+    const sender = chat.participants.find(p => p.id === msg.senderId);
+    const isGroup = chat.type === 'group';
+    const isChannel = chat.type === 'channel';
+
+    const index = filteredMessages.findIndex(m => m.id === msg.id);
+    const prevMsg = index > 0 ? filteredMessages[index - 1] : null;
+    const nextMsg = index >= 0 && index < filteredMessages.length - 1 ? filteredMessages[index + 1] : null;
+
+    const isSameSenderAsPrev = Boolean(prevMsg && prevMsg.senderId === msg.senderId && (msg.timestamp - prevMsg.timestamp < 5 * 60 * 1000));
+    const isSameSenderAsNext = Boolean(nextMsg && nextMsg.senderId === msg.senderId && (nextMsg.timestamp - msg.timestamp < 5 * 60 * 1000));
+
+    const isFirstInCluster = !isSameSenderAsPrev;
+    const isLastInCluster = !isSameSenderAsNext;
+
+    return (
+      <div className={`message-bubble ${isMe ? 'bubble-sent bg-[#2b5278] rounded-tr-none text-white' : 'bubble-received bg-[#182533] text-white'} ${
+        isGroup && !isMe 
+          ? (isLastInCluster ? 'rounded-bl-none' : 'rounded-bl-xl') 
+          : (isMe ? 'rounded-tr-none' : 'rounded-tl-none')
+      } p-2.5 md:p-3.5 relative rounded-2xl max-w-full break-words ${
+        options?.isFocusedOverlay ? 'shadow-2xl ring-2 ring-white/20 select-text scale-[1.01]' : 'shadow-md'
+      }`}>
+        {/* Telegram-style organic speech bubble tail emerging from avatar */}
+        {isGroup && !isMe && isLastInCluster && (
+          <svg 
+            className="message-tail-received absolute -left-[7px] bottom-0 w-[8px] h-[16px] text-[#182533] pointer-events-none drop-shadow-xs" 
+            viewBox="0 0 8 16" 
+            fill="none"
+          >
+            <path 
+              d="M8 0 C8 8, 2 13, 0 16 L8 16 Z" 
+              fill="currentColor" 
+            />
+          </svg>
+        )}
+
+        {/* Sender Name in Groups (Displayed only on First Message of cluster with distinctive colors) */}
+        {isGroup && !isMe && sender && isFirstInCluster && (
+          <div 
+            className="text-[12px] font-bold mb-1 cursor-pointer hover:underline flex items-center gap-1.5 transition-colors"
+            style={{ color: getSenderColor(sender.id || sender.username) }}
+            onClick={() => onUsernameClick(sender.username)}
+          >
+            <span>{sender.displayName}</span>
+          </div>
+        )}
+
+        {/* Sender Profile in Channel when showAuthorsProfiles is enabled */}
+        {isChannel && chat.showAuthorsProfiles && sender && (
+          <div 
+            className="flex items-center gap-1.5 mb-1.5 cursor-pointer group/author"
+            onClick={() => onUsernameClick(sender.username)}
+          >
+            <img 
+              src={sender.avatar || DEFAULT_AVATAR} 
+              className="w-4 h-4 rounded-full object-cover border border-[#3390ec]/30" 
+            />
+            <span className="text-[11px] font-bold text-[#3390ec] group-hover/author:underline">
+              {sender.displayName}
+            </span>
+            <span className="text-[8px] bg-[#3390ec]/15 text-[#3390ec] px-1.5 py-0.5 rounded-md font-semibold">
+              نویسنده
+            </span>
+          </div>
+        )}
+
+        {/* Forwarded Tag */}
+        {msg.forwardedFrom && (
+          <div className="text-[10px] text-[#708499] mb-1 flex items-center gap-1 italic">
+            <Share2 size={11} /> هدایت شده از {msg.forwardedFrom}
+          </div>
+        )}
+
+        {/* Reply Quote Card */}
+        {msg.replyToId && (
+          <div className="mb-2 p-2 bg-black/25 rounded-xl border-r-3 border-[#3390ec] text-[11px] opacity-90 cursor-pointer hover:bg-black/40 transition-colors">
+            <span className="text-[#3390ec] font-bold block mb-0.5">پاسخ</span>
+            <span className="truncate block opacity-80">{chat.messages.find(m => m.id === msg.replyToId)?.text || 'پیام'}</span>
+          </div>
+        )}
+
+        {/* Image Attachment (Clean without 'تصویر' text + Instant Interactive Zoom) */}
+        {msg.imageUrl && (
+          <div 
+            onClick={() => {
+              if (!autoDownloadPhotos && !revealedImages.has(msg.id)) {
+                setRevealedImages(current => new Set(current).add(msg.id));
+                return;
+              }
+              setLightboxImage(msg.imageUrl || null);
+              setZoomScale(1);
+              setPanOffset({ x: 0, y: 0 });
+            }}
+            className="rounded-xl overflow-hidden cursor-pointer group/img relative mb-1.5 bg-black/20"
+            title="کلیک برای بزرگنمایی کامل تصویر"
+          >
+            {autoDownloadPhotos || revealedImages.has(msg.id) ? (
+              <img
+                src={msg.imageUrl}
+                loading={autoDownloadPhotos ? 'eager' : 'lazy'}
+                className="max-h-[360px] w-full object-cover rounded-xl transition-transform duration-200 group-hover/img:scale-[1.02]"
+              />
+            ) : (
+              <button
+                type="button"
+                className="w-full min-h-28 flex items-center justify-center gap-2 text-white text-xs bg-black/20"
+                onClick={event => {
+                  event.stopPropagation();
+                  setRevealedImages(current => new Set(current).add(msg.id));
+                }}
+              >
+                <Download size={16} /> برای بارگیری عکس بزنید
+              </button>
+            )}
+            <div className="absolute inset-0 bg-black/25 opacity-0 group-hover/img:opacity-100 transition-opacity flex items-center justify-center text-white text-xs gap-1.5 font-bold pointer-events-none">
+              <ZoomIn size={16} /> بزرگنمایی تصویر
+            </div>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setLightboxImage(msg.imageUrl || null);
+                setZoomScale(1);
+                setPanOffset({ x: 0, y: 0 });
+              }}
+              className="absolute top-2.5 left-2.5 p-1.5 bg-black/60 hover:bg-[#3390ec] text-white rounded-full backdrop-blur-xs transition-all shadow-md active:scale-90"
+              title="بزرگنمایی"
+            >
+              <ZoomIn size={15}/>
+            </button>
+          </div>
+        )}
+
+        {/* Voice Message Player (Clean without 'پیام صوتی' text) */}
+        {msg.audioUrl && (
+          <div className="flex items-center gap-3 min-w-[200px] py-1 px-1">
+            <button 
+              onClick={() => handlePlayAudio(msg.id, msg.audioUrl!)}
+              className="bg-[#3390ec] p-2.5 rounded-full text-white shadow-lg hover:bg-[#2881d9] active:scale-95 transition-all"
+            >
+              {playingAudioId === msg.id ? <Pause size={17}/> : <Play size={17} className="mr-0.5"/>}
+            </button>
+            <div className="flex-1">
+              <div className="flex items-center gap-1 h-6">
+                {[12, 18, 8, 22, 14, 20, 10, 16, 24, 12, 18].map((h, i) => (
+                  <div 
+                    key={i} 
+                    style={{ height: playingAudioId === msg.id ? undefined : `${h}px` }}
+                    className={`w-1 rounded-full transition-all ${playingAudioId === msg.id ? 'bg-[#3390ec] wave-bar' : 'bg-white/40'}`} 
+                  />
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Interactive Poll */}
+        {msg.poll && (
+          <div className="space-y-2 py-1 min-w-[240px]">
+            <div className="flex items-center gap-1.5 text-xs font-bold text-white mb-1">
+              <BarChart2 size={16} className="text-[#3390ec]" />
+              <span>{msg.poll.question}</span>
+            </div>
+            <div className="space-y-1.5">
+              {msg.poll.options.map(opt => {
+                const hasVoted = opt.votes.includes(currentUser.id);
+                const total = msg.poll!.totalVotes || 0;
+                const percent = total > 0 ? Math.round((opt.votes.length / total) * 100) : 0;
+
+                return (
+                  <button
+                    key={opt.id}
+                    onClick={() => onAction('votePoll', { messageId: msg.id, optionId: opt.id })}
+                    className={`w-full p-2.5 rounded-xl border text-right transition-all relative overflow-hidden text-xs flex items-center justify-between ${hasVoted ? 'border-[#3390ec] bg-[#3390ec]/20' : 'border-white/10 hover:bg-white/5'}`}
+                  >
+                    <div 
+                      className="absolute top-0 bottom-0 right-0 bg-[#3390ec]/15 transition-all duration-300" 
+                      style={{ width: `${percent}%` }}
+                    />
+                    <div className="relative z-10 flex items-center gap-2">
+                      <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${hasVoted ? 'border-[#3390ec] bg-[#3390ec]' : 'border-white/30'}`}>
+                        {hasVoted && <Check size={11} className="text-white"/>}
+                      </div>
+                      <span className="text-white font-medium">{opt.text}</span>
+                    </div>
+                    <span className="relative z-10 text-[11px] text-[#708499] tabular-nums font-bold">
+                      {percent}% ({opt.votes.length})
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="text-[10px] text-[#708499] text-left tabular-nums pt-1">
+              مجموع آرا: {msg.poll.totalVotes}
+            </div>
+          </div>
+        )}
+
+        {/* Text Content (Rendered only if real text exists, not placeholders) */}
+        {shouldRenderText(msg.text) && (
+          <p className="chat-message-text leading-relaxed whitespace-pre-wrap font-normal break-words">
+            {renderMessageText(msg.text)}
+          </p>
+        )}
+
+        {/* Reactions Tally Badges */}
+        {msg.reactions && msg.reactions.length > 0 && (
+          <div className="flex flex-wrap gap-1 mt-2">
+            {msg.reactions.map(r => {
+              const hasReacted = r.users.includes(currentUser.id);
+              return (
+                <button
+                  key={r.emoji}
+                  onClick={() => onAction('react', { messageId: msg.id, emoji: r.emoji })}
+                  className={`px-2 py-0.5 rounded-full text-xs flex items-center gap-1 border transition-all ${hasReacted ? 'bg-[#3390ec]/20 border-[#3390ec] text-white' : 'bg-black/20 border-white/10 text-white/80 hover:bg-black/40'}`}
+                >
+                  <span>{r.emoji}</span>
+                  <span className="text-[10px] tabular-nums font-bold">{r.count}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Metadata (Time & Delivery Ticks / Channel Views) */}
+        <div className="bubble-meta flex items-center justify-end gap-1.5 mt-1 opacity-70 select-none text-[10px]">
+          {/* Channel Views Count */}
+          {isChannel && (
+            <span className="flex items-center gap-1 text-[10px] text-[#708499] font-mono mr-1" title="تعداد مشاهده">
+              <Eye size={12} className="text-[#708499]" />
+              <span className="tabular-nums">{msg.viewsCount || 1}</span>
+            </span>
+          )}
+
+          {/* Sign messages in Channel */}
+          {isChannel && chat.signMessages && sender && (
+            <span className="text-[10px] text-[#3390ec] font-medium mr-1 select-none" title="امضای نویسنده">
+              {sender.displayName}
+            </span>
+          )}
+          {msg.isEdited && <span className="text-[9px]">ویرایش شده</span>}
+          <span className="text-[9px] tabular-nums">
+            {new Date(msg.timestamp).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' })}
+          </span>
+          {isMe && !isChannel && (
+            (() => {
+              const isSeenByOthers = (msg.seenBy && msg.seenBy.some(s => s.userId !== currentUser.id)) || msg.isRead;
+              return isSeenByOthers ? (
+                <span title="دیده‌شده" className="inline-flex items-center text-[#3390ec]">
+                  <CheckCheck size={13} />
+                </span>
+              ) : (
+                <span title="ارسال شده" className="inline-flex items-center text-white/60">
+                  <Check size={13} />
+                </span>
+              );
+            })()
+          )}
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -878,7 +1221,10 @@ const ChatArea: React.FC<ChatAreaProps> = ({
       )}
 
       {/* Messages Feed */}
-      <main className="flex-1 overflow-y-auto p-3 md:p-4 space-y-2 custom-scrollbar pb-8">
+      <main 
+        className="flex-1 overflow-y-auto p-3 md:p-4 space-y-2 custom-scrollbar pb-8"
+        onScroll={() => { if (contextMenu) setContextMenu(null); }}
+      >
         {filteredMessages.map((msg, index) => {
           const isMe = msg.senderId === currentUser.id;
           const sender = chat.participants.find(p => p.id === msg.senderId);
@@ -962,11 +1308,19 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                 {/* Message Bubble (With Right-Click and Mobile Long-Press) */}
                 <div 
                   dir="rtl"
-                  className="relative select-text max-w-full"
+                  className={`relative max-w-full select-none transition-opacity duration-150 ${
+                    contextMenu?.message.id === msg.id ? 'opacity-0' : 'opacity-100'
+                  }`}
+                  style={{
+                    WebkitTouchCallout: 'none',
+                    WebkitUserSelect: 'none',
+                    userSelect: 'none',
+                  }}
                   onContextMenu={(e) => handleContextMenu(e, msg)}
                   onTouchStart={(e) => handleTouchStart(e, msg)}
                   onTouchMove={handleTouchMove}
                   onTouchEnd={handleTouchEnd}
+                  onTouchCancel={handleTouchCancel}
                 >
                   {/* Floating Reaction Bar when toggled */}
                   {activeReactionMsgId === msg.id && (
@@ -986,249 +1340,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                     </div>
                   )}
 
-                  <div className={`message-bubble ${isMe ? 'bubble-sent bg-[#2b5278] rounded-tr-none text-white' : 'bubble-received bg-[#182533] text-white'} ${
-                    isGroup && !isMe 
-                      ? (isLastInCluster ? 'rounded-bl-none' : 'rounded-bl-xl') 
-                      : (isMe ? 'rounded-tr-none' : 'rounded-tl-none')
-                  } p-2.5 md:p-3.5 shadow-md relative rounded-2xl max-w-full break-words`}>
-                    {/* Telegram-style organic speech bubble tail emerging from avatar */}
-                    {isGroup && !isMe && isLastInCluster && (
-                      <svg 
-                        className="message-tail-received absolute -left-[7px] bottom-0 w-[8px] h-[16px] text-[#182533] pointer-events-none drop-shadow-xs" 
-                        viewBox="0 0 8 16" 
-                        fill="none"
-                      >
-                        <path 
-                          d="M8 0 C8 8, 2 13, 0 16 L8 16 Z" 
-                          fill="currentColor" 
-                        />
-                      </svg>
-                    )}
-
-                    {/* Sender Name in Groups (Displayed only on First Message of cluster with distinctive colors) */}
-                    {isGroup && !isMe && sender && isFirstInCluster && (
-                      <div 
-                        className="text-[12px] font-bold mb-1 cursor-pointer hover:underline flex items-center gap-1.5 transition-colors"
-                        style={{ color: getSenderColor(sender.id || sender.username) }}
-                        onClick={() => onUsernameClick(sender.username)}
-                      >
-                        <span>{sender.displayName}</span>
-                      </div>
-                    )}
-
-                    {/* Sender Profile in Channel when showAuthorsProfiles is enabled */}
-                    {isChannel && chat.showAuthorsProfiles && sender && (
-                      <div 
-                        className="flex items-center gap-1.5 mb-1.5 cursor-pointer group/author"
-                        onClick={() => onUsernameClick(sender.username)}
-                      >
-                        <img 
-                          src={sender.avatar || DEFAULT_AVATAR} 
-                          className="w-4 h-4 rounded-full object-cover border border-[#3390ec]/30" 
-                        />
-                        <span className="text-[11px] font-bold text-[#3390ec] group-hover/author:underline">
-                          {sender.displayName}
-                        </span>
-                        <span className="text-[8px] bg-[#3390ec]/15 text-[#3390ec] px-1.5 py-0.5 rounded-md font-semibold">
-                          نویسنده
-                        </span>
-                      </div>
-                    )}
-
-                    {/* Forwarded Tag */}
-                    {msg.forwardedFrom && (
-                      <div className="text-[10px] text-[#708499] mb-1 flex items-center gap-1 italic">
-                        <Share2 size={11} /> هدایت شده از {msg.forwardedFrom}
-                      </div>
-                    )}
-
-                    {/* Reply Quote Card */}
-                    {msg.replyToId && (
-                      <div className="mb-2 p-2 bg-black/25 rounded-xl border-r-3 border-[#3390ec] text-[11px] opacity-90 cursor-pointer hover:bg-black/40 transition-colors">
-                        <span className="text-[#3390ec] font-bold block mb-0.5">پاسخ</span>
-                        <span className="truncate block opacity-80">{chat.messages.find(m => m.id === msg.replyToId)?.text || 'پیام'}</span>
-                      </div>
-                    )}
-
-                    {/* Image Attachment (Clean without 'تصویر' text + Instant Interactive Zoom) */}
-                    {msg.imageUrl && (
-                      <div 
-                        onClick={() => {
-                          if (!autoDownloadPhotos && !revealedImages.has(msg.id)) {
-                            setRevealedImages(current => new Set(current).add(msg.id));
-                            return;
-                          }
-                          setLightboxImage(msg.imageUrl || null);
-                          setZoomScale(1);
-                          setPanOffset({ x: 0, y: 0 });
-                        }}
-                        className="rounded-xl overflow-hidden cursor-pointer group/img relative mb-1.5 bg-black/20"
-                        title="کلیک برای بزرگنمایی کامل تصویر"
-                      >
-                        {autoDownloadPhotos || revealedImages.has(msg.id) ? (
-                          <img
-                            src={msg.imageUrl}
-                            loading={autoDownloadPhotos ? 'eager' : 'lazy'}
-                            className="max-h-[360px] w-full object-cover rounded-xl transition-transform duration-200 group-hover/img:scale-[1.02]"
-                          />
-                        ) : (
-                          <button
-                            type="button"
-                            className="w-full min-h-28 flex items-center justify-center gap-2 text-white text-xs bg-black/20"
-                            onClick={event => {
-                              event.stopPropagation();
-                              setRevealedImages(current => new Set(current).add(msg.id));
-                            }}
-                          >
-                            <Download size={16} /> برای بارگیری عکس بزنید
-                          </button>
-                        )}
-                        <div className="absolute inset-0 bg-black/25 opacity-0 group-hover/img:opacity-100 transition-opacity flex items-center justify-center text-white text-xs gap-1.5 font-bold pointer-events-none">
-                          <ZoomIn size={16} /> بزرگنمایی تصویر
-                        </div>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setLightboxImage(msg.imageUrl || null);
-                            setZoomScale(1);
-                            setPanOffset({ x: 0, y: 0 });
-                          }}
-                          className="absolute top-2.5 left-2.5 p-1.5 bg-black/60 hover:bg-[#3390ec] text-white rounded-full backdrop-blur-xs transition-all shadow-md active:scale-90"
-                          title="بزرگنمایی"
-                        >
-                          <ZoomIn size={15}/>
-                        </button>
-                      </div>
-                    )}
-
-                    {/* Voice Message Player (Clean without 'پیام صوتی' text) */}
-                    {msg.audioUrl && (
-                      <div className="flex items-center gap-3 min-w-[200px] py-1 px-1">
-                        <button 
-                          onClick={() => handlePlayAudio(msg.id, msg.audioUrl!)}
-                          className="bg-[#3390ec] p-2.5 rounded-full text-white shadow-lg hover:bg-[#2881d9] active:scale-95 transition-all"
-                        >
-                          {playingAudioId === msg.id ? <Pause size={17}/> : <Play size={17} className="mr-0.5"/>}
-                        </button>
-                        <div className="flex-1">
-                          <div className="flex items-center gap-1 h-6">
-                            {[12, 18, 8, 22, 14, 20, 10, 16, 24, 12, 18].map((h, i) => (
-                              <div 
-                                key={i} 
-                                style={{ height: playingAudioId === msg.id ? undefined : `${h}px` }}
-                                className={`w-1 rounded-full transition-all ${playingAudioId === msg.id ? 'bg-[#3390ec] wave-bar' : 'bg-white/40'}`} 
-                              />
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Interactive Poll */}
-                    {msg.poll && (
-                      <div className="space-y-2 py-1 min-w-[240px]">
-                        <div className="flex items-center gap-1.5 text-xs font-bold text-white mb-1">
-                          <BarChart2 size={16} className="text-[#3390ec]" />
-                          <span>{msg.poll.question}</span>
-                        </div>
-                        <div className="space-y-1.5">
-                          {msg.poll.options.map(opt => {
-                            const hasVoted = opt.votes.includes(currentUser.id);
-                            const total = msg.poll!.totalVotes || 0;
-                            const percent = total > 0 ? Math.round((opt.votes.length / total) * 100) : 0;
-
-                            return (
-                              <button
-                                key={opt.id}
-                                onClick={() => onAction('votePoll', { messageId: msg.id, optionId: opt.id })}
-                                className={`w-full p-2.5 rounded-xl border text-right transition-all relative overflow-hidden text-xs flex items-center justify-between ${hasVoted ? 'border-[#3390ec] bg-[#3390ec]/20' : 'border-white/10 hover:bg-white/5'}`}
-                              >
-                                <div 
-                                  className="absolute top-0 bottom-0 right-0 bg-[#3390ec]/15 transition-all duration-300" 
-                                  style={{ width: `${percent}%` }}
-                                />
-                                <div className="relative z-10 flex items-center gap-2">
-                                  <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${hasVoted ? 'border-[#3390ec] bg-[#3390ec]' : 'border-white/30'}`}>
-                                    {hasVoted && <Check size={11} className="text-white"/>}
-                                  </div>
-                                  <span className="text-white font-medium">{opt.text}</span>
-                                </div>
-                                <span className="relative z-10 text-[11px] text-[#708499] tabular-nums font-bold">
-                                  {percent}% ({opt.votes.length})
-                                </span>
-                              </button>
-                            );
-                          })}
-                        </div>
-                        <div className="text-[10px] text-[#708499] text-left tabular-nums pt-1">
-                          مجموع آرا: {msg.poll.totalVotes}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Text Content (Rendered only if real text exists, not placeholders) */}
-                    {shouldRenderText(msg.text) && (
-                      <p className="chat-message-text leading-relaxed whitespace-pre-wrap font-normal break-words">
-                        {renderMessageText(msg.text)}
-                      </p>
-                    )}
-
-                    {/* Reactions Tally Badges */}
-                    {msg.reactions && msg.reactions.length > 0 && (
-                      <div className="flex flex-wrap gap-1 mt-2">
-                        {msg.reactions.map(r => {
-                          const hasReacted = r.users.includes(currentUser.id);
-                          return (
-                            <button
-                              key={r.emoji}
-                              onClick={() => onAction('react', { messageId: msg.id, emoji: r.emoji })}
-                              className={`px-2 py-0.5 rounded-full text-xs flex items-center gap-1 border transition-all ${hasReacted ? 'bg-[#3390ec]/20 border-[#3390ec] text-white' : 'bg-black/20 border-white/10 text-white/80 hover:bg-black/40'}`}
-                            >
-                              <span>{r.emoji}</span>
-                              <span className="text-[10px] tabular-nums font-bold">{r.count}</span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
-
-                    {/* Metadata (Time & Delivery Ticks / Channel Views) */}
-                    <div className="bubble-meta flex items-center justify-end gap-1.5 mt-1 opacity-70 select-none text-[10px]">
-                      {/* Channel Views Count */}
-                      {isChannel && (
-                        <span className="flex items-center gap-1 text-[10px] text-[#708499] font-mono mr-1" title="تعداد مشاهده">
-                          <Eye size={12} className="text-[#708499]" />
-                          <span className="tabular-nums">{msg.viewsCount || 1}</span>
-                        </span>
-                      )}
-
-                      {/* Sign messages in Channel */}
-                      {isChannel && chat.signMessages && sender && (
-                        <span className="text-[10px] text-[#3390ec] font-medium mr-1 select-none" title="امضای نویسنده">
-                          {sender.displayName}
-                        </span>
-                      )}
-                      {msg.isEdited && <span className="text-[9px]">ویرایش شده</span>}
-                      <span className="text-[9px] tabular-nums">
-                        {new Date(msg.timestamp).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' })}
-                      </span>
-                      {isMe && !isChannel && (
-                        (() => {
-                          const isSeenByOthers = (msg.seenBy && msg.seenBy.some(s => s.userId !== currentUser.id)) || msg.isRead;
-                          return isSeenByOthers ? (
-                            <span title="دیده‌شده" className="inline-flex items-center text-[#3390ec]">
-                              <CheckCheck size={13} />
-                            </span>
-                          ) : (
-                            <span title="ارسال شده" className="inline-flex items-center text-white/60">
-                              <Check size={13} />
-                            </span>
-                          );
-                        })()
-                      )}
-                    </div>
-                  </div>
+                  {renderMessageBubbleContent(msg)}
                 </div>
 
                 {/* For other users: Hover actions on right of the bubble */}
@@ -1240,20 +1352,40 @@ const ChatArea: React.FC<ChatAreaProps> = ({
         <div ref={msgEndRef} />
       </main>
 
-      {/* Floating Context Menu (Right-Click & Mobile Long-Press) */}
+      {/* Telegram-style Focused Message & Context Menu Overlay */}
       {contextMenu && (
         <div 
-          className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs animate-in fade-in"
+          className="fixed inset-0 z-50 overflow-hidden select-none"
           onClick={() => setContextMenu(null)}
           onContextMenu={(e) => { e.preventDefault(); setContextMenu(null); }}
         >
+          {/* Deep Dim & Blur Backdrop that blurs everything else */}
           <div 
-            className="fixed bg-[#17212b] border border-white/10 rounded-2xl shadow-2xl p-2 w-56 space-y-1 animate-pop z-50 text-xs"
+            className="absolute inset-0 bg-black/65 backdrop-blur-md animate-in fade-in duration-200"
+            aria-hidden="true"
+          />
+
+          {/* Elevated Focused Message Bubble - completely sharp above blur */}
+          <div
+            className="fixed z-50 pointer-events-auto transition-transform duration-150 animate-pop"
+            style={{
+              top: `${contextMenu.targetRect.top}px`,
+              left: `${contextMenu.targetRect.left}px`,
+              width: `${contextMenu.targetRect.width}px`,
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {renderMessageBubbleContent(contextMenu.message, { isFocusedOverlay: true })}
+          </div>
+
+          {/* Context Menu Floating Card */}
+          <div 
+            className="fixed bg-[#17212b]/95 border border-white/10 rounded-2xl shadow-2xl p-2 w-[232px] space-y-1 animate-pop z-50 text-xs backdrop-blur-xl"
             style={{ top: `${contextMenu.y}px`, left: `${contextMenu.x}px` }}
             onClick={(e) => e.stopPropagation()}
           >
             {/* Quick Reaction Bar */}
-            <div className="flex items-center justify-between p-1.5 bg-[#242f3d] rounded-xl mb-1">
+            <div className="flex items-center justify-between p-1.5 bg-[#242f3d]/90 rounded-xl mb-1 border border-white/5 shadow-inner">
               {POPULAR_REACTIONS.map(emoji => (
                 <button 
                   key={emoji}
@@ -1261,7 +1393,8 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                     onAction('react', { messageId: contextMenu.message.id, emoji });
                     setContextMenu(null);
                   }}
-                  className="w-7 h-7 flex items-center justify-center hover:scale-130 transition-transform text-sm"
+                  className="w-7 h-7 flex items-center justify-center hover:scale-130 active:scale-95 transition-transform text-sm"
+                  title={emoji}
                 >
                   {emoji}
                 </button>
@@ -1366,7 +1499,8 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                 onClick={() => {
                   navigator.clipboard.writeText(contextMenu.message.text);
                   setContextMenu(null);
-                  alert("متن پیام کپی شد!");
+                  setCopyToast('متن پیام کپی شد!');
+                  setTimeout(() => setCopyToast(null), 2000);
                 }}
                 className="w-full flex items-center gap-2.5 p-2.5 hover:bg-white/5 rounded-xl text-white transition-colors"
               >
@@ -2481,6 +2615,14 @@ const ChatArea: React.FC<ChatAreaProps> = ({
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Toast notification for successful copy or forward */}
+      {copyToast && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-[#242f3d] border border-white/10 text-white px-4 py-2.5 rounded-full shadow-2xl text-xs font-bold flex items-center gap-2 animate-in slide-in-from-bottom duration-200 backdrop-blur-md">
+          <CheckCircle2 size={16} className="text-emerald-400" />
+          <span>{copyToast}</span>
         </div>
       )}
 
