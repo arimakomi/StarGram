@@ -40,6 +40,8 @@ interface ChatAreaProps {
   onOpenSavedMessages?: () => void;
   onReportMessage?: (message: Message) => void;
   systemConfig?: SystemConfig;
+  highlightedMessageId?: string | null;
+  onClearHighlightedMessage?: () => void;
 }
 
 const POPULAR_REACTIONS = ['❤️', '👍', '🔥', '😂', '👏', '🎉'];
@@ -102,9 +104,30 @@ const DEFAULT_ADMIN_PERMISSIONS: AdminPermissions = {
 
 const ChatArea: React.FC<ChatAreaProps> = ({ 
   chat, currentUser, isTyping, onAction, onDeleteChat, onBack, onUsernameClick, onToggleContact,
-  chats = [], onOpenSavedMessages, onReportMessage, systemConfig
+  chats = [], onOpenSavedMessages, onReportMessage, systemConfig,
+  highlightedMessageId, onClearHighlightedMessage
 }) => {
   const [inputText, setInputText] = useState('');
+  const [activeHighlightId, setActiveHighlightId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!highlightedMessageId || !chat) return;
+    setActiveHighlightId(highlightedMessageId);
+    const scrollTimer = setTimeout(() => {
+      const el = document.getElementById(highlightedMessageId);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }, 80);
+    const clearTimer = setTimeout(() => {
+      setActiveHighlightId(null);
+      if (onClearHighlightedMessage) onClearHighlightedMessage();
+    }, 3200);
+    return () => {
+      clearTimeout(scrollTimer);
+      clearTimeout(clearTimer);
+    };
+  }, [highlightedMessageId, chat?.id]);
   const [showInfo, setShowInfo] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [selectedEmojiTab, setSelectedEmojiTab] = useState('smileys');
@@ -1004,8 +1027,12 @@ const ChatArea: React.FC<ChatAreaProps> = ({
         isGroup && !isMe 
           ? (isLastInCluster ? 'rounded-bl-none' : 'rounded-bl-xl') 
           : (isMe ? 'rounded-tr-none' : 'rounded-tl-none')
-      } p-2.5 md:p-3.5 relative rounded-2xl max-w-full break-words ${
-        options?.isFocusedOverlay ? 'shadow-2xl ring-2 ring-white/20 select-text scale-[1.01]' : 'shadow-md'
+      } p-2.5 md:p-3.5 relative rounded-2xl max-w-full break-words transition-all duration-300 ${
+        options?.isFocusedOverlay
+          ? 'shadow-2xl ring-2 ring-white/20 select-text scale-[1.01]'
+          : activeHighlightId === msg.id
+          ? 'ring-2 ring-[#3390ec] shadow-[0_0_24px_rgba(51,144,236,0.65)] scale-[1.015]'
+          : 'shadow-md'
       }`}>
         {/* Telegram-style organic speech bubble tail emerging from avatar */}
         {isGroup && !isMe && isLastInCluster && (
@@ -3163,9 +3190,9 @@ const ChatArea: React.FC<ChatAreaProps> = ({
               <Phone size={28} />
             </div>
             <div>
-              <h3 className="text-base font-bold text-white">تایید شماره همراه الزامی است</h3>
+              <h3 className="text-base font-bold text-white">تایید شماره موبایل الزامی است</h3>
               <p className="text-xs text-gray-300 mt-2 leading-relaxed">
-                طبق تنظیمات مدیریت سیستم، فقط کاربرانی که شماره تلفن همراه خود را با پیامک (OTP) تایید کرده باشند مجاز به ارسال پیام و رسانه هستند.
+                طبق تنظیمات مدیریت سیستم، فقط کاربرانی که شماره موبایل خود را تایید کرده باشند مجاز به ارسال پیام و رسانه هستند.
               </p>
             </div>
             <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-2xl text-[11px] text-amber-300 leading-relaxed">

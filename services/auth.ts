@@ -44,6 +44,7 @@ export const authApi = {
   heartbeat: () => call('/api/users/heartbeat', { method: 'POST' }),
   logout: async () => { await call('/api/auth/logout', { method: 'POST' }); setToken(null); },
   deleteAccount: async () => { const r = await call('/api/auth/delete-account', { method: 'POST' }); setToken(null); return r; },
+  publicConfig: () => call('/api/public-config'),
   checkPhone: async (phone: string, excludeUserId?: string) => {
     return call(`/api/users/check-phone/${encodeURIComponent(phone)}${excludeUserId ? `?excludeUserId=${encodeURIComponent(excludeUserId)}` : ''}`);
   },
@@ -55,7 +56,7 @@ export const authApi = {
     if (r.success && r.token) setToken(r.token);
     return r;
   },
-  testSms: async (payload: { phone: string; smsApiKey?: string; smsLineNumber?: string; smsSendMode?: string; smsPatternCode?: string; smsPatternVarName?: string }) => {
+  testSms: async (payload: { phone: string; smsApiKey?: string; smsLineNumber?: string; smsSendMode?: string; smsPatternCode?: string; smsPatternVarName?: string; smsFallbackEnabled?: boolean; otpCodeLength?: number }) => {
     return call('/api/admin/sms/test', { method: 'POST', json: payload });
   }
 };

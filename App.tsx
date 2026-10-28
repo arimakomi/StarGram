@@ -44,6 +44,7 @@ const App: React.FC = () => {
     applyAppearancePreferences();
   }, []);
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
+  const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
   const [chats, setChats] = useState<Chat[]>([]);
   const [isTyping, setIsTyping] = useState(false);
   const [activeFolder, setActiveFolder] = useState<FolderType>('all');
@@ -54,8 +55,19 @@ const App: React.FC = () => {
   const [systemConfig, setSystemConfig] = useState<SystemConfig>({
     allowGroupCreation: true,
     allowChannelCreation: true,
-    allowStories: true
+    allowStories: true,
+    smsOtpEnabled: true,
+    smsFallbackEnabled: true,
+    otpCodeLength: 6
   });
+
+  useEffect(() => {
+    authApi.publicConfig().then(res => {
+      if (res && res.success && res.config) {
+        setSystemConfig(prev => ({ ...prev, ...res.config }));
+      }
+    }).catch(() => {});
+  }, []);
 
   // Modals
   const [showMyProfile, setShowMyProfile] = useState(false);
@@ -1187,6 +1199,10 @@ const App: React.FC = () => {
               await createChatInFirestore(newChat);
               setActiveChatId(id);
             }}
+            onSelectSearchResultMessage={(chatId, msgId) => {
+              setActiveChatId(chatId);
+              setHighlightedMessageId(msgId);
+            }}
           />
         </div>
 
@@ -1202,6 +1218,8 @@ const App: React.FC = () => {
             onToggleContact={handleToggleContact}
             onReportMessage={(msg) => setReportingMessage(msg)}
             systemConfig={systemConfig}
+            highlightedMessageId={highlightedMessageId}
+            onClearHighlightedMessage={() => setHighlightedMessageId(null)}
           />
         </div>
       </div>

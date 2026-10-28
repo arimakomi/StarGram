@@ -7,6 +7,7 @@ import { authApi } from '../services/auth';
 import { User, DEFAULT_AVATAR, SystemConfig } from '../types';
 import { generateLocalAvatarSvg } from '../services/avatarGenerator';
 import { StarChatLogo } from './StarChatLogo';
+import { cleanIranPhone, isValidIranPhone, sanitizeOtpCode, isValidOtpCode } from '../services/otpUtils';
 
 interface LoginProps {
   onLogin: (userData: User) => void | Promise<void>;
@@ -39,6 +40,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin, systemConfig }) => {
   const [otpDisplayName, setOtpDisplayName] = useState('');
   const [simulatedCode, setSimulatedCode] = useState<string | null>(null);
   const [timerSeconds, setTimerSeconds] = useState(0);
+  const expectedOtpLength = systemConfig?.otpCodeLength === 5 ? 5 : 6;
 
   // General State
   const [error, setError] = useState('');
@@ -53,22 +55,6 @@ export const Login: React.FC<LoginProps> = ({ onLogin, systemConfig }) => {
     }, 1000);
     return () => clearInterval(interval);
   }, [timerSeconds]);
-
-  // Clean and normalize Iranian phone number
-  const cleanIranPhone = (raw: string): string => {
-    const persianDigits = ['۰', '۱', '۲', '۳', '۴', '۵', '۶', '۷', '۸', '۹'];
-    const arabicDigits = ['٠', '١', '٢', '٣', '٤', '٥', '٦', '٧', '٨', '٩'];
-    let val = raw.trim();
-    for (let i = 0; i < 10; i++) {
-      val = val.split(persianDigits[i]).join(String(i)).split(arabicDigits[i]).join(String(i));
-    }
-    val = val.replace(/[^0-9+]/g, '');
-    if (val.startsWith('+98')) val = '0' + val.slice(3);
-    else if (val.startsWith('0098')) val = '0' + val.slice(4);
-    else if (val.startsWith('98')) val = '0' + val.slice(2);
-    else if (val.startsWith('9') && val.length === 10) val = '0' + val;
-    return val;
-  };
 
   // --- 1. CREDENTIALS FLOW (ID + Password only) ---
   const proceedToPassword = async (e: React.FormEvent) => {
@@ -120,7 +106,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin, systemConfig }) => {
   const handleSendOtp = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     const normalized = cleanIranPhone(phone);
-    if (!/^09\d{9}$/.test(normalized)) {
+    if (!isValidIranPhone(normalized)) {
       return setError('شماره همراه نامعتبر است (مثال: 09123456789)');
     }
 
@@ -136,11 +122,14 @@ export const Login: React.FC<LoginProps> = ({ onLogin, systemConfig }) => {
         return;
       }
 
+      setPhone(normalized);
       setOtpStep('code');
-      setTimerSeconds(120);
+      setTimerSeconds(Number(res.expiresInSeconds) || (Number(systemConfig?.otpExpiresInMinutes || 2) * 60));
       if (res.simulated && res.simulatedOtp) {
-        setSimulatedCode(res.simulatedOtp);
-        setOtpCode(res.simulatedOtp);
+        setSimulatedCode(String(res.simulatedOtp));
+        setOtpCode(String(res.simulatedOtp));
+      } else {
+        setOtpCode('');
       }
       setSuccessMsg(res.message || 'کد تایید با موفقیت ارسال شد.');
     } catch (err) {
@@ -154,10 +143,10 @@ export const Login: React.FC<LoginProps> = ({ onLogin, systemConfig }) => {
   const handleVerifyOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     const normalized = cleanIranPhone(phone);
-    const cleanCode = otpCode.trim();
+    const cleanCode = sanitizeOtpCode(otpCode, expectedOtpLength);
 
-    if (!cleanCode || cleanCode.length < 5) {
-      return setError('کد تایید را به طور کامل وارد کنید');
+    if (!isValidOtpCode(cleanCode)) {
+      return setError(`کد تایید ${expectedOtpLength} رقمی را به طور کامل وارد کنید`);
     }
 
     setIsLoading(true);
@@ -288,7 +277,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin, systemConfig }) => {
                 }`}
               >
                 <Phone size={14} />
-                <span>شماره همراه (OTP)</span>
+                <span>شماره موبایل</span>
               </button>
             </div>
           )}
@@ -433,20 +422,28 @@ export const Login: React.FC<LoginProps> = ({ onLogin, systemConfig }) => {
                   </div>
 
                   {simulatedCode && (
-                    <div className="p-3 bg-emerald-500/15 border border-emerald-500/30 rounded-xl text-emerald-400 text-xs flex items-center justify-between animate-in">
+                    <div 
+                      data-testid="login-simulated-otp-box"
+                      onClick={() => setOtpCode(simulatedCode)}
+                      className="p-3 bg-emerald-500/15 border border-emerald-500/30 rounded-xl text-emerald-400 text-xs flex items-center justify-between animate-in cursor-pointer hover:bg-emerald-500/20 transition-colors"
+                      title="کلیک برای درج خودکار کد"
+                    >
                       <span>کد آزمایشی (شبیه‌ساز پیامک):</span>
-                      <span className="font-mono font-black text-sm bg-black/40 px-2 py-0.5 rounded-lg text-white" dir="ltr">{simulatedCode}</span>
+                      <span data-testid="login-simulated-otp-code" className="font-mono font-black text-sm bg-black/40 px-2.5 py-0.5 rounded-lg text-white" dir="ltr">{simulatedCode}</span>
                     </div>
                   )}
 
                   <div className="space-y-1.5">
-                    <label className="text-[11px] font-bold text-[#3390ec] uppercase ml-1">کد ۶ رقمی دریافتی</label>
+                    <label className="text-[11px] font-bold text-[#3390ec] uppercase ml-1">کد {expectedOtpLength === 5 ? '۵' : '۶'} رقمی دریافتی</label>
                     <input 
+                      data-testid="login-otp-code-input"
                       type="text" 
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
                       value={otpCode} 
-                      onChange={e => setOtpCode(e.target.value.replace(/[^0-9]/g, '').slice(0, 6))}
-                      placeholder="------" 
-                      maxLength={6}
+                      onChange={e => setOtpCode(sanitizeOtpCode(e.target.value, expectedOtpLength))}
+                      placeholder={expectedOtpLength === 5 ? '-----' : '------'} 
+                      maxLength={expectedOtpLength}
                       className="w-full bg-[#242f3d] py-3 px-4 rounded-xl outline-none border border-transparent focus:border-[#3390ec] transition-all text-center text-lg font-mono tracking-[0.5em] font-black text-white"
                       autoFocus
                       dir="ltr"
@@ -472,8 +469,9 @@ export const Login: React.FC<LoginProps> = ({ onLogin, systemConfig }) => {
                   </div>
 
                   <button 
+                    data-testid="login-otp-verify-btn"
                     type="submit" 
-                    disabled={isLoading || otpCode.length < 5} 
+                    disabled={isLoading || !isValidOtpCode(otpCode, expectedOtpLength)} 
                     className="w-full py-3.5 bg-[#3390ec] rounded-xl font-bold hover:bg-[#2881d9] active:scale-95 transition-all shadow-lg shadow-[#3390ec]/20 flex items-center justify-center gap-2 text-sm disabled:opacity-50"
                   >
                     {isLoading && <Loader2 className="animate-spin" size={18}/>}

@@ -9,6 +9,7 @@ import {
 import { compressImage } from '../services/imageUtils';
 import { generateLocalAvatarSvg } from '../services/avatarGenerator';
 import { authApi } from '../services/auth';
+import { cleanIranPhone, isValidIranPhone, sanitizeOtpCode, isValidOtpCode } from '../services/otpUtils';
 
 interface MyProfileModalProps {
   user: User;
@@ -40,6 +41,7 @@ export const MyProfileModal: React.FC<MyProfileModalProps> = ({ user, onClose, o
   const [otpSimulated, setOtpSimulated] = useState<string | null>(null);
   const [otpTimer, setOtpTimer] = useState(0);
   const [otpSuccessToast, setOtpSuccessToast] = useState<string | null>(null);
+  const expectedOtpLength = systemConfig?.otpCodeLength === 5 ? 5 : 6;
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -51,21 +53,6 @@ export const MyProfileModal: React.FC<MyProfileModalProps> = ({ user, onClose, o
     }, 1000);
     return () => clearInterval(interval);
   }, [otpTimer]);
-
-  const cleanIranPhone = (raw: string): string => {
-    const persianDigits = ['۰', '۱', '۲', '۳', '۴', '۵', '۶', '۷', '۸', '۹'];
-    const arabicDigits = ['٠', '١', '٢', '٣', '٤', '٥', '٦', '٧', '٨', '٩'];
-    let val = raw.trim();
-    for (let i = 0; i < 10; i++) {
-      val = val.split(persianDigits[i]).join(String(i)).split(arabicDigits[i]).join(String(i));
-    }
-    val = val.replace(/[^0-9+]/g, '');
-    if (val.startsWith('+98')) val = '0' + val.slice(3);
-    else if (val.startsWith('0098')) val = '0' + val.slice(4);
-    else if (val.startsWith('98')) val = '0' + val.slice(2);
-    else if (val.startsWith('9') && val.length === 10) val = '0' + val;
-    return val;
-  };
 
   const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -90,24 +77,16 @@ export const MyProfileModal: React.FC<MyProfileModalProps> = ({ user, onClose, o
     setAvatar(newSvg);
   };
 
-  // Open OTP Modal to add or change phone
-  const handleOpenPhoneVerification = () => {
-    setNewPhoneInput(phone || '');
-    setOtpCodeInput('');
-    setOtpError('');
-    setOtpSimulated(null);
-    setOtpModalStep('phone');
-    setShowOtpModal(true);
-  };
-
-  // Send OTP from popup
-  const handleSendOtpInModal = async () => {
-    const normalized = cleanIranPhone(newPhoneInput);
-    if (!/^09\d{9}$/.test(normalized)) {
+  // Send OTP from popup (or directly when opening popup with a valid unverified phone)
+  const handleSendOtpInModal = async (overridePhone?: string) => {
+    const rawTarget = overridePhone !== undefined ? overridePhone : newPhoneInput;
+    const normalized = cleanIranPhone(rawTarget);
+    if (!isValidIranPhone(normalized)) {
       setOtpError('شماره همراه نامعتبر است (مثال: 09121234567)');
       return;
     }
 
+    setNewPhoneInput(normalized);
     setOtpLoading(true);
     setOtpError('');
     setOtpSimulated(null);
@@ -115,7 +94,7 @@ export const MyProfileModal: React.FC<MyProfileModalProps> = ({ user, onClose, o
     try {
       // 1. بررسی عدم تکراری بودن شماره
       const checkRes = await authApi.checkPhone(normalized, user.id);
-      if (!checkRes.available) {
+      if (checkRes && checkRes.available === false) {
         setOtpError(checkRes.message || 'این شماره همراه قبلاً توسط کاربر دیگری ثبت شده است.');
         setOtpLoading(false);
         return;
@@ -130,10 +109,12 @@ export const MyProfileModal: React.FC<MyProfileModalProps> = ({ user, onClose, o
       }
 
       setOtpModalStep('code');
-      setOtpTimer(120);
+      setOtpTimer(Number(res.expiresInSeconds) || (Number(systemConfig?.otpExpiresInMinutes || 2) * 60));
       if (res.simulated && res.simulatedOtp) {
-        setOtpSimulated(res.simulatedOtp);
-        setOtpCodeInput(res.simulatedOtp);
+        setOtpSimulated(String(res.simulatedOtp));
+        setOtpCodeInput(String(res.simulatedOtp));
+      } else {
+        setOtpCodeInput('');
       }
     } catch (err) {
       console.error(err);
@@ -143,12 +124,28 @@ export const MyProfileModal: React.FC<MyProfileModalProps> = ({ user, onClose, o
     }
   };
 
+  // Open OTP Modal to add or change phone
+  const handleOpenPhoneVerification = () => {
+    const initialPhone = cleanIranPhone(phone || '');
+    setNewPhoneInput(initialPhone || phone || '');
+    setOtpCodeInput('');
+    setOtpError('');
+    setOtpSimulated(null);
+    setOtpModalStep('phone');
+    setShowOtpModal(true);
+
+    // If user typed a valid unverified phone in the profile input and clicked verify, send OTP immediately
+    if (!isPhoneVerified && isValidIranPhone(initialPhone)) {
+      void handleSendOtpInModal(initialPhone);
+    }
+  };
+
   // Verify OTP code in popup
   const handleVerifyOtpInModal = async () => {
     const normalized = cleanIranPhone(newPhoneInput);
-    const code = otpCodeInput.trim();
-    if (!code || code.length < 5) {
-      setOtpError('کد ۶ رقمی را وارد کنید');
+    const code = sanitizeOtpCode(otpCodeInput, expectedOtpLength);
+    if (!isValidOtpCode(code)) {
+      setOtpError(`کد ${expectedOtpLength === 5 ? '۵' : '۶'} رقمی را به طور کامل وارد کنید`);
       return;
     }
 
@@ -333,7 +330,7 @@ export const MyProfileModal: React.FC<MyProfileModalProps> = ({ user, onClose, o
                 <label className="block text-xs font-bold text-gray-400">شماره تلفن همراه</label>
                 {systemConfig?.smsOtpEnabled === false ? (
                   <span className="text-[10px] font-bold text-sky-400 bg-sky-500/10 border border-sky-500/20 px-2 py-0.5 rounded-full flex items-center gap-1">
-                    ثبت آزاد شماره (بدون OTP)
+                    ثبت آزاد شماره موبایل
                   </span>
                 ) : (
                   isPhoneVerified && phone && (
@@ -360,7 +357,7 @@ export const MyProfileModal: React.FC<MyProfileModalProps> = ({ user, onClose, o
                     <Phone className="w-4 h-4 text-gray-400 absolute left-3.5 top-3" />
                   </div>
                   <p className="text-[10px] text-gray-400">
-                    سیستم تایید پیامکی (OTP) توسط مدیریت غیرفعال شده است. می‌توانید شماره همراه خود را مستقیماً ثبت یا تغییر دهید.
+                    سیستم تایید پیامکی توسط مدیریت غیرفعال شده است. می‌توانید شماره موبایل خود را مستقیماً ثبت یا تغییر دهید.
                   </p>
                 </div>
               ) : isPhoneVerified && phone ? (
@@ -406,7 +403,7 @@ export const MyProfileModal: React.FC<MyProfileModalProps> = ({ user, onClose, o
                     className="w-full py-2 px-3 bg-[#3390ec]/15 hover:bg-[#3390ec]/25 border border-[#3390ec]/30 text-[#3390ec] rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all"
                   >
                     <Smartphone size={14} />
-                    <span>تایید و فعال‌سازی شماره با پیامک (OTP)</span>
+                    <span>تایید و فعال‌سازی شماره موبایل</span>
                   </button>
                 </div>
               )}
@@ -525,7 +522,7 @@ export const MyProfileModal: React.FC<MyProfileModalProps> = ({ user, onClose, o
             <div className="flex items-center justify-between border-b border-white/5 pb-3">
               <div className="flex items-center gap-2 font-bold text-white text-sm">
                 <Smartphone className="text-[#3390ec]" size={18} />
-                <span>{phone && isPhoneVerified ? 'تعویض شماره همراه' : 'تایید شماره همراه با OTP'}</span>
+                <span>{phone && isPhoneVerified ? 'تعویض شماره موبایل' : 'تایید شماره موبایل'}</span>
               </div>
               <button 
                 type="button"
@@ -560,9 +557,10 @@ export const MyProfileModal: React.FC<MyProfileModalProps> = ({ user, onClose, o
                 </div>
 
                 <button
+                  data-testid="profile-otp-send-btn"
                   type="button"
                   disabled={otpLoading}
-                  onClick={handleSendOtpInModal}
+                  onClick={() => handleSendOtpInModal()}
                   className="w-full py-3 bg-[#3390ec] hover:bg-[#2881d9] active:scale-95 text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 shadow-md shadow-[#3390ec]/25 disabled:opacity-50"
                 >
                   {otpLoading && <Loader2 className="animate-spin" size={16}/>}
@@ -589,20 +587,28 @@ export const MyProfileModal: React.FC<MyProfileModalProps> = ({ user, onClose, o
                 </div>
 
                 {otpSimulated && (
-                  <div className="p-2.5 bg-emerald-500/15 border border-emerald-500/30 rounded-xl text-emerald-400 text-xs flex items-center justify-between">
+                  <div 
+                    data-testid="profile-simulated-otp-box"
+                    onClick={() => setOtpCodeInput(otpSimulated)}
+                    className="p-2.5 bg-emerald-500/15 border border-emerald-500/30 rounded-xl text-emerald-400 text-xs flex items-center justify-between cursor-pointer hover:bg-emerald-500/20 transition-colors"
+                    title="کلیک برای درج خودکار کد"
+                  >
                     <span>کد شبیه‌ساز (محیط تست):</span>
-                    <span className="font-mono font-black text-sm bg-black/40 px-2 py-0.5 rounded-lg text-white" dir="ltr">{otpSimulated}</span>
+                    <span data-testid="profile-simulated-otp-code" className="font-mono font-black text-sm bg-black/40 px-2 py-0.5 rounded-lg text-white" dir="ltr">{otpSimulated}</span>
                   </div>
                 )}
 
                 <div className="space-y-1.5">
-                  <label className="text-[11px] font-bold text-[#3390ec]">کد ۶ رقمی پیامک شده</label>
+                  <label className="text-[11px] font-bold text-[#3390ec]">کد {expectedOtpLength === 5 ? '۵' : '۶'} رقمی پیامک شده</label>
                   <input 
+                    data-testid="profile-otp-code-input"
                     type="text"
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
                     value={otpCodeInput}
-                    onChange={e => setOtpCodeInput(e.target.value.replace(/[^0-9]/g, '').slice(0, 6))}
-                    placeholder="------"
-                    maxLength={6}
+                    onChange={e => setOtpCodeInput(sanitizeOtpCode(e.target.value, expectedOtpLength))}
+                    placeholder={expectedOtpLength === 5 ? '-----' : '------'}
+                    maxLength={expectedOtpLength}
                     className="w-full bg-[#0e1621] py-3 px-3 rounded-xl border border-white/10 focus:border-[#3390ec] text-white text-lg font-mono tracking-[0.5em] font-black outline-none text-center"
                     dir="ltr"
                     autoFocus
@@ -618,7 +624,7 @@ export const MyProfileModal: React.FC<MyProfileModalProps> = ({ user, onClose, o
                   ) : (
                     <button
                       type="button"
-                      onClick={handleSendOtpInModal}
+                      onClick={() => handleSendOtpInModal()}
                       className="text-[#3390ec] hover:underline text-[11px] font-bold flex items-center gap-1"
                     >
                       <RefreshCw size={12} />
@@ -628,8 +634,9 @@ export const MyProfileModal: React.FC<MyProfileModalProps> = ({ user, onClose, o
                 </div>
 
                 <button
+                  data-testid="profile-otp-verify-btn"
                   type="button"
-                  disabled={otpLoading || otpCodeInput.length < 5}
+                  disabled={otpLoading || !isValidOtpCode(otpCodeInput, expectedOtpLength)}
                   onClick={handleVerifyOtpInModal}
                   className="w-full py-3 bg-[#3390ec] hover:bg-[#2881d9] active:scale-95 text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 shadow-md shadow-[#3390ec]/25 disabled:opacity-50"
                 >

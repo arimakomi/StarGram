@@ -6,7 +6,6 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, (process as any).cwd(), '');
   return {
     plugins: [react()],
-    server: { proxy: { '/api': 'http://localhost:3000' } },
     base: '/', // تنظیم روی / برای اجرا در دامنه اصلی (مثلا chat.site.com)
     build: {
       outDir: 'dist',

@@ -29,6 +29,7 @@ const DIST_DIR = path.join(__dirname, 'dist');
 const DATA_DIR = path.join(__dirname, 'data');
 const LOCAL_DB_FILE = path.join(DATA_DIR, 'stargram_db.json');
 const INIT_ONLY = process.argv.includes('--init');
+const IS_DEV = process.argv.includes('--dev') || process.env.NODE_ENV === 'development';
 const SESSION_TTL = 30 * 24 * 3600 * 1000;
 const PROTECTED_USER_FIELDS = ['role', 'isBanned', 'bannedUntil', 'banReason'];
 
@@ -539,9 +540,15 @@ async function ensureAdmin({ reset }) {
   if (!(await dbAdapter.getDoc('system_config', 'main'))) {
     await dbAdapter.putDoc('system_config', 'main', {
       id: 'main',
+      allowRegistration: true,
       allowGroupCreation: true,
       allowChannelCreation: true,
       allowStories: true,
+      smsOtpEnabled: true,
+      smsFallbackEnabled: true,
+      otpCodeLength: 6,
+      otpExpiresInMinutes: 2,
+      requireVerifiedPhoneForMessaging: false,
       geminiEnabled: false,
       geminiApiKey: '',
       geminiProxyUrl: '',
@@ -623,6 +630,34 @@ app.get('/api/health', wrap(async (req, res) => {
   });
 }));
 
+// تنظیمات عمومی برای صفحه ورود (بدون نیاز به توکن و بدون افشای کلیدهای محرمانه)
+app.get('/api/public-config', wrap(async (req, res) => {
+  const cfg = await dbAdapter.getDoc('system_config', 'main') || {};
+  res.json({
+    success: true,
+    config: {
+      id: 'main',
+      appName: cfg.appName,
+      appSlogan: cfg.appSlogan,
+      welcomeMessage: cfg.welcomeMessage,
+      loginBannerUrl: cfg.loginBannerUrl,
+      customLogoUrl: cfg.customLogoUrl,
+      customSymbolUrl: cfg.customSymbolUrl,
+      accentColor: cfg.accentColor,
+      allowRegistration: cfg.allowRegistration !== false,
+      allowGroupCreation: cfg.allowGroupCreation !== false,
+      allowChannelCreation: cfg.allowChannelCreation !== false,
+      allowStories: cfg.allowStories !== false,
+      smsOtpEnabled: cfg.smsOtpEnabled !== false,
+      smsFallbackEnabled: cfg.smsFallbackEnabled !== false,
+      otpCodeLength: cfg.otpCodeLength === 5 ? 5 : 6,
+      otpExpiresInMinutes: Number(cfg.otpExpiresInMinutes) || 2,
+      requireVerifiedPhoneForMessaging: Boolean(cfg.requireVerifiedPhoneForMessaging),
+      maxUploadSizeMb: Number(cfg.maxUploadSizeMb) || 15
+    }
+  });
+}));
+
 async function createSession(userId, userAgent = '') {
   const token = crypto.randomBytes(32).toString('hex');
   const now = Date.now();
@@ -684,7 +719,7 @@ app.post('/api/auth/login', wrap(async (req, res) => {
 }));
 
 // ───────────── سامانه پیامک و احراز هویت با کد یک‌بار مصرف (OTP - ایران پیامک) ─────────────
-function normalizeIranPhone(raw) {
+function normalizeDigitsServer(raw) {
   if (!raw || typeof raw !== 'string') return '';
   const persianDigits = ['۰', '۱', '۲', '۳', '۴', '۵', '۶', '۷', '۸', '۹'];
   const arabicDigits = ['٠', '١', '٢', '٣', '٤', '٥', '٦', '٧', '٨', '٩'];
@@ -692,10 +727,16 @@ function normalizeIranPhone(raw) {
   for (let i = 0; i < 10; i++) {
     cleaned = cleaned.replaceAll(persianDigits[i], String(i)).replaceAll(arabicDigits[i], String(i));
   }
+  return cleaned;
+}
+
+function normalizeIranPhone(raw) {
+  if (!raw || typeof raw !== 'string') return '';
+  let cleaned = normalizeDigitsServer(raw);
   cleaned = cleaned.replace(/[^0-9+]/g, '');
   if (cleaned.startsWith('+98')) cleaned = '0' + cleaned.slice(3);
   else if (cleaned.startsWith('0098')) cleaned = '0' + cleaned.slice(4);
-  else if (cleaned.startsWith('98')) cleaned = '0' + cleaned.slice(2);
+  else if (cleaned.startsWith('98') && cleaned.length >= 11) cleaned = '0' + cleaned.slice(2);
   else if (cleaned.startsWith('9') && cleaned.length === 10) cleaned = '0' + cleaned;
 
   if (/^09\d{9}$/.test(cleaned)) {
@@ -704,7 +745,7 @@ function normalizeIranPhone(raw) {
   return '';
 }
 
-const otpStore = new Map(); // phone -> { code, expiresAt, sentAt, attempts }
+const otpStore = new Map(); // phone -> { code, expiresAt, sentAt, attempts, verified }
 const OTP_TTL = 120 * 1000; // 2 minutes
 
 async function findUserByPhone(phone) {
@@ -820,7 +861,7 @@ app.post(['/api/sms/send-otp', '/api/v1/sms/send-otp'], wrap(async (req, res) =>
 
   const sysCfg = await dbAdapter.getDoc('system_config', 'main') || {};
   if (sysCfg.smsOtpEnabled === false) {
-    return res.status(400).json({ success: false, message: 'احراز هویت پیامکی (OTP) در حال حاضر توسط مدیریت غیرفعال شده است.' });
+    return res.status(400).json({ success: false, message: 'ورود و تایید شماره موبایل در حال حاضر توسط مدیریت غیرفعال شده است.' });
   }
 
   const phone = normalizeIranPhone(rawPhone);
@@ -836,11 +877,13 @@ app.post(['/api/sms/send-otp', '/api/v1/sms/send-otp'], wrap(async (req, res) =>
     }
   }
 
-  // محدودیت ارسال مجدد (حداقل ۶۰ ثانیه فاصله)
+  // محدودیت ارسال مجدد (در حالت درگاه واقعی ۶۰ ثانیه، در حالت شبیه‌ساز ۵ ثانیه)
   const existingOtp = otpStore.get(phone);
   const now = Date.now();
-  if (existingOtp && (now - existingOtp.sentAt < 60 * 1000)) {
-    const remainSec = Math.ceil((60 * 1000 - (now - existingOtp.sentAt)) / 1000);
+  const hasRealGateway = Boolean(sysCfg.smsApiKey || process.env.IRANPAYAMAK_API_KEY);
+  const cooldownMs = hasRealGateway ? 60 * 1000 : 5 * 1000;
+  if (existingOtp && (now - existingOtp.sentAt < cooldownMs)) {
+    const remainSec = Math.ceil((cooldownMs - (now - existingOtp.sentAt)) / 1000);
     return res.status(429).json({ success: false, message: `لطفاً ${remainSec} ثانیه صبر کرده و سپس مجدداً تلاش نمایید.` });
   }
 
@@ -859,7 +902,8 @@ app.post(['/api/sms/send-otp', '/api/v1/sms/send-otp'], wrap(async (req, res) =>
     code,
     expiresAt: now + ttlMs,
     sentAt: now,
-    attempts: 0
+    attempts: 0,
+    verified: false
   });
 
   res.json({
@@ -867,6 +911,7 @@ app.post(['/api/sms/send-otp', '/api/v1/sms/send-otp'], wrap(async (req, res) =>
     message: smsResult.message || 'کد تایید ارسال شد.',
     simulated: smsResult.simulated,
     simulatedOtp: smsResult.simulated ? code : undefined,
+    codeLength,
     expiresInSeconds: Math.round(ttlMs / 1000)
   });
 }));
@@ -874,7 +919,7 @@ app.post(['/api/sms/send-otp', '/api/v1/sms/send-otp'], wrap(async (req, res) =>
 // بررسی و تایید کد OTP (برای ورود یا تایید شماره در پروفایل)
 app.post(['/api/sms/verify-otp', '/api/v1/sms/verify-otp'], wrap(async (req, res) => {
   const rawPhone = req.body?.phone;
-  const code = String(req.body?.code || '').trim();
+  const code = normalizeDigitsServer(String(req.body?.code || '')).replace(/[^0-9]/g, '');
   const purpose = req.body?.purpose || 'login'; // 'login' | 'verify'
   const userId = req.body?.userId;
 
@@ -886,7 +931,7 @@ app.post(['/api/sms/verify-otp', '/api/v1/sms/verify-otp'], wrap(async (req, res
   const now = Date.now();
 
   if (!record) {
-    return res.status(400).json({ success: false, message: 'کد تایید یافت نشد. لطفاً مجدداً درخواست ارسال کد دهید.' });
+    return res.status(400).json({ success: false, message: 'کد تایید یافت نشد یا منقضی شده است. لطفاً مجدداً درخواست ارسال کد دهید.' });
   }
 
   if (now > record.expiresAt) {
@@ -903,9 +948,6 @@ app.post(['/api/sms/verify-otp', '/api/v1/sms/verify-otp'], wrap(async (req, res
     return res.status(400).json({ success: false, message: 'کد تایید وارد شده نادرست است.' });
   }
 
-  // کد صحیح بود؛ پاک کردن از حافظه موقت
-  otpStore.delete(phone);
-
   if (purpose === 'verify') {
     // تایید شماره در پروفایل کاربر جاری
     if (!userId) return res.status(400).json({ success: false, message: 'شناسه کاربر الزامی است.' });
@@ -918,6 +960,7 @@ app.post(['/api/sms/verify-otp', '/api/v1/sms/verify-otp'], wrap(async (req, res
       return res.status(409).json({ success: false, message: 'این شماره همراه به نام کاربر دیگری در سیستم ثبت شده است.' });
     }
 
+    otpStore.delete(phone);
     user.phone = phone;
     user.isPhoneVerified = true;
     await dbAdapter.putDoc('users', userId, user, now);
@@ -933,7 +976,10 @@ app.post(['/api/sms/verify-otp', '/api/v1/sms/verify-otp'], wrap(async (req, res
     const desiredDisplayName = String(req.body?.displayName || '').trim().slice(0, 60);
 
     if (!desiredUsername) {
-      // به کلاینت اطلاع می‌دهیم که شماره تایید شد اما برای تکمیل ساخت حساب نام و یوزرنیم نیاز است
+      // کد صحیح بود؛ رکورد را تاییدشده علامت می‌زنیم و زمان آن را تمدید می‌کنیم تا کاربر مرحله تکمیل پروفایل را انجام دهد
+      record.verified = true;
+      record.expiresAt = Math.max(record.expiresAt, now + 10 * 60 * 1000);
+      otpStore.set(phone, record);
       return res.json({
         success: true,
         isNewUser: true,
@@ -969,6 +1015,9 @@ app.post(['/api/sms/verify-otp', '/api/v1/sms/verify-otp'], wrap(async (req, res
     existingUser = newUser;
   }
 
+  // پاک کردن کد از حافظه پس از تکمیل نهایی ورود یا ثبت‌نام
+  otpStore.delete(phone);
+
   if (existingUser.isBanned) {
     if (existingUser.bannedUntil && existingUser.bannedUntil < now) {
       existingUser.isBanned = false; delete existingUser.bannedUntil; delete existingUser.banReason;
@@ -997,19 +1046,28 @@ app.post(['/api/admin/sms/test', '/api/v1/admin/sms/test'], auth, wrap(async (re
   if (!isAdmin(req.user)) return res.status(403).json({ success: false, message: 'فقط مدیر سیستم مجاز به تست سامانه پیامک است.' });
   const rawPhone = req.body?.phone;
   const phone = normalizeIranPhone(rawPhone);
-  if (!phone) return res.status(400).json({ success: false, message: 'شماره همراه برای تست نامعتبر است.' });
+  if (!phone) return res.status(400).json({ success: false, message: 'شماره همراه برای تست نامعتبر است (مثال: 09123456789).' });
 
+  const storedCfg = await dbAdapter.getDoc('system_config', 'main') || {};
   const testConfig = {
-    smsApiKey: req.body?.smsApiKey,
-    smsLineNumber: req.body?.smsLineNumber,
-    smsSendMode: req.body?.smsSendMode || 'pattern',
-    smsPatternCode: req.body?.smsPatternCode,
-    smsPatternVarName: req.body?.smsPatternVarName || 'code'
+    smsApiKey: req.body?.smsApiKey !== undefined ? req.body.smsApiKey : storedCfg.smsApiKey,
+    smsLineNumber: req.body?.smsLineNumber !== undefined ? req.body.smsLineNumber : storedCfg.smsLineNumber,
+    smsSendMode: req.body?.smsSendMode || storedCfg.smsSendMode || 'pattern',
+    smsPatternCode: req.body?.smsPatternCode !== undefined ? req.body.smsPatternCode : storedCfg.smsPatternCode,
+    smsPatternVarName: req.body?.smsPatternVarName || storedCfg.smsPatternVarName || 'code',
+    smsFallbackEnabled: req.body?.smsFallbackEnabled !== undefined ? req.body.smsFallbackEnabled : (storedCfg.smsFallbackEnabled !== false)
   };
 
-  const code = Math.floor(100000 + Math.random() * 900000).toString();
+  const codeLength = (req.body?.otpCodeLength || storedCfg.otpCodeLength) === 5 ? 5 : 6;
+  const minNum = codeLength === 5 ? 10000 : 100000;
+  const maxNum = codeLength === 5 ? 90000 : 900000;
+  const code = Math.floor(minNum + Math.random() * maxNum).toString();
   const result = await sendIranPayamakSms({ phone, code, config: testConfig });
-  res.json(result);
+  res.json({
+    ...result,
+    code,
+    phone
+  });
 }));
 
 // ───────────── احراز هویت توکن‌های API و نشست‌های کاربران ─────────────
@@ -2020,17 +2078,7 @@ app.post('/api/v1/sessions/terminate-others', auth, wrap(async (req, res) => {
   });
 }));
 
-// فایل‌های استاتیک
-app.use('/assets', express.static(path.join(DIST_DIR, 'assets'), { maxAge: '1y', immutable: true }));
-app.use(express.static(DIST_DIR));
-app.use((req, res) => {
-  if (req.method !== 'GET' || req.path.startsWith('/api/')) return res.status(404).json({ success: false, message: 'Not found' });
-  const indexPath = path.join(DIST_DIR, 'index.html');
-  if (fs.existsSync(indexPath)) return res.sendFile(indexPath);
-  res.status(503).send('Production dist directory not found. Please run "npm run build" first.');
-});
-
-// ───────────── راه‌اندازی سرور ─────────────
+// ───────────── راه‌اندازی سرور و فایل‌های فرانت‌اند (Vite در محیط توسعه / dist در پروداکشن) ─────────────
 try {
   dbAdapter = await setupDatabase();
   await ensureAdmin({ reset: INIT_ONLY });
@@ -2042,6 +2090,25 @@ try {
 if (INIT_ONLY) {
   await dbAdapter.close();
   process.exit(0);
+}
+
+const hasDistBuild = fs.existsSync(path.join(DIST_DIR, 'index.html'));
+if (IS_DEV || !hasDistBuild) {
+  const { createServer: createViteServer } = await import('vite');
+  const vite = await createViteServer({
+    server: { middlewareMode: true, hmr: false },
+    appType: 'spa',
+  });
+  app.use(vite.middlewares);
+} else {
+  app.use('/assets', express.static(path.join(DIST_DIR, 'assets'), { maxAge: '1y', immutable: true }));
+  app.use(express.static(DIST_DIR));
+  app.use((req, res) => {
+    if (req.method !== 'GET' || req.path.startsWith('/api/')) return res.status(404).json({ success: false, message: 'Not found' });
+    const indexPath = path.join(DIST_DIR, 'index.html');
+    if (fs.existsSync(indexPath)) return res.sendFile(indexPath);
+    res.status(503).send('Production dist directory not found. Please run "npm run build" first.');
+  });
 }
 
 app.listen(PORT, '0.0.0.0', () => {

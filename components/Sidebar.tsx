@@ -20,6 +20,12 @@ import {
   shouldAllowContextMenuEvent,
   clampContextMenuPosition,
 } from '../services/longPressUtils';
+import {
+  filterChatsAndMessages,
+  getChatDisplayTitle,
+  getChatDisplayAvatar,
+} from '../services/searchUtils';
+import { normalizeDigits } from '../services/otpUtils';
 
 interface SidebarProps {
   chats: Chat[];
@@ -47,6 +53,7 @@ interface SidebarProps {
   systemConfig: SystemConfig;
   onOpenMyProfile: () => void;
   onOpenAdminPanel: () => void;
+  onSelectSearchResultMessage?: (chatId: string, messageId: string) => void;
 }
 
 
@@ -62,13 +69,34 @@ const getChatUnseenCount = (chat: Chat, currentUserId: string): number => {
   return count > 0 ? count : (chat.unreadCount > 0 ? chat.unreadCount : 0);
 };
 
+// Helper to highlight matched substring in search results
+const renderHighlightedText = (text: string, rawQuery: string) => {
+  const q = normalizeDigits(rawQuery.trim()).toLowerCase();
+  if (!q || !text) return text;
+  const normText = normalizeDigits(text).toLowerCase();
+  const idx = normText.indexOf(q);
+  if (idx === -1) return text;
+  const before = text.slice(0, idx);
+  const match = text.slice(idx, idx + q.length);
+  const after = text.slice(idx + q.length);
+  return (
+    <>
+      {before}
+      <mark className="bg-[#3390ec]/35 text-white px-1 rounded font-bold">{match}</mark>
+      {after}
+    </>
+  );
+};
+
 const Sidebar: React.FC<SidebarProps> = ({ 
   chats, activeChatId, setActiveChatId, currentUser, activeFolder, setActiveFolder, 
   onOpenSettings, onLogout, onStartChat, onCreateGroup, onCreateChannel, onToggleContact,
   onOpenSavedMessages, onPinChat, onArchiveChat, onMuteChat, onMarkReadChat, onClearHistory, onDeleteChat,
-  stories, onOpenCreateStory, onViewStory, systemConfig, onOpenMyProfile, onOpenAdminPanel
+  stories, onOpenCreateStory, onViewStory, systemConfig, onOpenMyProfile, onOpenAdminPanel,
+  onSelectSearchResultMessage
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
+  const [searchFilterTab, setSearchFilterTab] = useState<'all' | 'chats' | 'messages' | 'global'>('all');
   const [showDrawer, setShowDrawer] = useState(false);
   const [showContactsModal, setShowContactsModal] = useState(false);
   const [isArchiveExpanded, setIsArchiveExpanded] = useState(false);
@@ -529,6 +557,14 @@ const Sidebar: React.FC<SidebarProps> = ({
     ? allUsersList.find(u => u.username.toLowerCase() === cleanTargetUsername && u.id !== currentUser.id)
     : null;
 
+  // Real-time local search across user's conversations and messages
+  const localSearchResults = useMemo(
+    () => filterChatsAndMessages(chats, searchQuery, currentUser),
+    [chats, searchQuery, currentUser]
+  );
+
+  const isSearchActive = searchQuery.trim().length >= 1;
+
   return (
     <div className="flex flex-col h-full w-full bg-[#17212b] border-l border-black/20 relative select-none">
       {/* Header */}
@@ -543,14 +579,19 @@ const Sidebar: React.FC<SidebarProps> = ({
         <div className="flex-1 relative">
            <Search size={18} className="absolute right-3.5 top-2.5 text-[#708499]" />
            <input 
+             data-testid="sidebar-global-search-input"
              value={searchQuery}
-             onChange={(e) => setSearchQuery(e.target.value)}
-             placeholder="جستجو پیام، کاربر یا کانال..."
-             className="w-full bg-[#242f3d] py-2 pr-10 pl-4 rounded-full text-[13px] outline-none text-white focus:bg-[#0e1621] transition-colors border border-transparent focus:border-[#3390ec]/30"
+             onChange={(e) => {
+               setSearchQuery(e.target.value);
+               if (!e.target.value.trim()) setSearchFilterTab('all');
+             }}
+             placeholder="جستجو در گفتگوها، پیام‌ها، کاربران یا کانال‌ها..."
+             className="w-full bg-[#242f3d] py-2 pr-10 pl-8 rounded-full text-[13px] outline-none text-white focus:bg-[#0e1621] transition-colors border border-transparent focus:border-[#3390ec]/30"
            />
            {searchQuery && (
              <button 
-               onClick={() => setSearchQuery('')}
+               data-testid="sidebar-search-clear-btn"
+               onClick={() => { setSearchQuery(''); setSearchFilterTab('all'); }}
                className="absolute left-3 top-2.5 text-[#708499] hover:text-white"
              >
                <X size={16}/>
@@ -602,12 +643,161 @@ const Sidebar: React.FC<SidebarProps> = ({
         onScroll={handleChatListScroll}
         className="flex-1 overflow-y-auto custom-scrollbar touch-pan-y"
       >
-        {searchQuery.trim().length >= 2 ? (
-           <div className="p-2 space-y-3">
-              {isSearching ? (
-                <div className="text-center text-[#708499] text-xs py-8 animate-pulse">درحال جستجوی سراسری...</div>
-              ) : (
+        {isSearchActive ? (
+           <div className="p-2 space-y-3" data-testid="sidebar-search-results">
+              {/* Real-time Search Filter Tabs */}
+              <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-1 border-b border-white/5 px-1">
+                {[
+                  { id: 'all' as const, label: 'همه', count: localSearchResults.matchedChats.length + localSearchResults.matchedMessages.length + globalResults.publicChats.length + globalResults.users.length },
+                  { id: 'chats' as const, label: 'گفتگوها', count: localSearchResults.matchedChats.length },
+                  { id: 'messages' as const, label: 'پیام‌ها', count: localSearchResults.matchedMessages.length },
+                  { id: 'global' as const, label: 'کاوش سراسری', count: globalResults.publicChats.length + globalResults.users.length },
+                ].map(tab => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    data-testid={`search-tab-${tab.id}`}
+                    onClick={() => setSearchFilterTab(tab.id)}
+                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold whitespace-nowrap transition-all ${
+                      searchFilterTab === tab.id
+                        ? 'bg-[#3390ec] text-white shadow-sm shadow-[#3390ec]/30'
+                        : 'bg-[#242f3d] text-[#708499] hover:text-white'
+                    }`}
+                  >
+                    <span>{tab.label}</span>
+                    {tab.count > 0 && (
+                      <span className={`px-1.5 py-0.2 rounded-full text-[10px] tabular-nums ${
+                        searchFilterTab === tab.id ? 'bg-white/20 text-white' : 'bg-black/25 text-[#3390ec]'
+                      }`}>
+                        {tab.count}
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </div>
+
+              {/* 1. Matched User Conversations (Instant Real-time Filter) */}
+              {(searchFilterTab === 'all' || searchFilterTab === 'chats') && localSearchResults.matchedChats.length > 0 && (
+                <div>
+                  <div className="text-[11px] font-bold text-[#3390ec] px-2 mb-1.5 flex items-center justify-between">
+                    <span className="flex items-center gap-1">
+                      <MessageCircle size={13}/>
+                      گفتگوهای شما
+                    </span>
+                    <span className="text-[10px] text-[#708499] tabular-nums">{localSearchResults.matchedChats.length} گفتگو</span>
+                  </div>
+                  <div className="space-y-1">
+                    {localSearchResults.matchedChats.map(chat => {
+                      const title = getChatDisplayTitle(chat, currentUser.id);
+                      const avatar = getChatDisplayAvatar(chat, currentUser.id);
+                      const isSelected = activeChatId === chat.id;
+                      const lastMsg = chat.lastMessage;
+                      return (
+                        <div
+                          key={chat.id}
+                          data-testid={`search-result-chat-${chat.id}`}
+                          onClick={() => {
+                            handleChatRowSelect(chat);
+                          }}
+                          className={`flex items-center gap-3 p-2.5 rounded-xl cursor-pointer transition-all active:scale-[0.99] ${
+                            isSelected ? 'bg-[#3390ec] text-white' : 'hover:bg-[#2b5278]/25'
+                          }`}
+                        >
+                          {chat.type === 'saved' ? (
+                            <div className="w-11 h-11 rounded-full bg-[#3390ec] flex items-center justify-center shrink-0">
+                              <Bookmark size={20} className="text-white fill-current"/>
+                            </div>
+                          ) : (
+                            <img
+                              src={avatar || DEFAULT_AVATAR}
+                              onError={(e) => { e.currentTarget.src = DEFAULT_AVATAR; }}
+                              className="w-11 h-11 rounded-full bg-[#242f3d] object-cover border border-white/5 shrink-0"
+                            />
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between gap-2">
+                              <h4 className="font-bold text-white text-[13px] truncate">
+                                {renderHighlightedText(title, searchQuery)}
+                              </h4>
+                              <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
+                                isSelected ? 'bg-white/20 text-white' : 'bg-white/5 text-[#708499]'
+                              }`}>
+                                {chat.type === 'private' ? 'شخصی' : chat.type === 'group' ? 'گروه' : chat.type === 'channel' ? 'کانال' : 'ذخیره‌شده'}
+                              </span>
+                            </div>
+                            <p className={`text-xs truncate mt-0.5 ${isSelected ? 'text-white/85' : 'text-[#708499]'}`}>
+                              {lastMsg?.text ? renderHighlightedText(lastMsg.text, searchQuery) : 'مشاهده گفتگو'}
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* 2. Matched Messages Across All Chats (Instant Real-time Filter) */}
+              {(searchFilterTab === 'all' || searchFilterTab === 'messages') && localSearchResults.matchedMessages.length > 0 && (
+                <div>
+                  <div className="text-[11px] font-bold text-[#3390ec] px-2 mb-1.5 flex items-center justify-between">
+                    <span className="flex items-center gap-1">
+                      <Search size={13}/>
+                      پیام‌های یافت‌شده
+                    </span>
+                    <span className="text-[10px] text-[#708499] tabular-nums">{localSearchResults.matchedMessages.length} پیام</span>
+                  </div>
+                  <div className="space-y-1">
+                    {localSearchResults.matchedMessages.map(item => (
+                      <div
+                        key={`${item.chat.id}_${item.message.id}`}
+                        data-testid={`search-result-message-${item.message.id}`}
+                        onClick={() => {
+                          if (onSelectSearchResultMessage) {
+                            onSelectSearchResultMessage(item.chat.id, item.message.id);
+                          } else {
+                            setActiveChatId(item.chat.id);
+                          }
+                        }}
+                        className="flex items-start gap-3 p-2.5 hover:bg-[#2b5278]/25 rounded-xl cursor-pointer transition-all active:scale-[0.99] border border-white/[0.03]"
+                      >
+                        {item.chat.type === 'saved' ? (
+                          <div className="w-10 h-10 rounded-full bg-[#3390ec] flex items-center justify-center shrink-0 mt-0.5">
+                            <Bookmark size={18} className="text-white fill-current"/>
+                          </div>
+                        ) : (
+                          <img
+                            src={item.chatAvatar || DEFAULT_AVATAR}
+                            onError={(e) => { e.currentTarget.src = DEFAULT_AVATAR; }}
+                            className="w-10 h-10 rounded-full bg-[#242f3d] object-cover border border-white/5 shrink-0 mt-0.5"
+                          />
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between gap-2 mb-0.5">
+                            <h4 className="font-bold text-white text-[13px] truncate">
+                              {renderHighlightedText(item.chatTitle, searchQuery)}
+                            </h4>
+                            <span className="text-[10px] text-[#708499] tabular-nums shrink-0">
+                              {new Date(item.message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                          </div>
+                          <p className="text-xs text-white/85 line-clamp-2 leading-relaxed break-words">
+                            <span className="text-[#3390ec] font-semibold ml-1">{item.senderName}:</span>
+                            {renderHighlightedText(item.snippet, searchQuery)}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* 3. Global Public Groups/Channels & Users */}
+              {(searchFilterTab === 'all' || searchFilterTab === 'global') && (
                 <>
+                  {isSearching && (
+                    <div className="text-center text-[#708499] text-xs py-3 animate-pulse">درحال جستجوی سراسری...</div>
+                  )}
+
                   {/* Public Groups & Channels Results */}
                   {globalResults.publicChats.length > 0 && (
                     <div>
@@ -622,10 +812,12 @@ const Sidebar: React.FC<SidebarProps> = ({
                             onClick={() => { setActiveChatId(c.id); setSearchQuery(''); }}
                             className="flex items-center gap-3 p-2.5 hover:bg-[#2b5278]/25 rounded-xl cursor-pointer transition-all active:scale-[0.99]"
                           >
-                            <img src={c.groupAvatar || ''} className="w-11 h-11 rounded-full bg-[#242f3d] object-cover border border-white/5"/>
+                            <img src={c.groupAvatar || DEFAULT_AVATAR} onError={(e) => { e.currentTarget.src = DEFAULT_AVATAR; }} className="w-11 h-11 rounded-full bg-[#242f3d] object-cover border border-white/5"/>
                             <div className="flex-1 min-w-0">
                                <div className="flex items-center gap-1.5">
-                                 <h4 className="font-bold text-white text-[13px] truncate">{c.groupName}</h4>
+                                 <h4 className="font-bold text-white text-[13px] truncate">
+                                   {renderHighlightedText(c.groupName || '', searchQuery)}
+                                 </h4>
                                  {c.isPublic && <span className="text-[10px] bg-[#3390ec]/20 text-[#3390ec] px-1.5 rounded font-medium">عمومی</span>}
                                </div>
                                <p className="text-xs text-[#708499] truncate">
@@ -661,7 +853,9 @@ const Sidebar: React.FC<SidebarProps> = ({
                               className="w-11 h-11 rounded-full bg-[#242f3d] object-cover border border-white/5"
                             />
                             <div className="flex-1 min-w-0">
-                               <h4 className="font-bold text-white text-[13px] truncate">{u.displayName}</h4>
+                               <h4 className="font-bold text-white text-[13px] truncate">
+                                 {renderHighlightedText(u.displayName, searchQuery)}
+                               </h4>
                                <p className="text-xs text-[#708499] truncate">@{u.username}</p>
                             </div>
                             <span className="text-xs text-[#3390ec] bg-[#3390ec]/10 px-2.5 py-1 rounded-lg font-medium">
@@ -672,14 +866,23 @@ const Sidebar: React.FC<SidebarProps> = ({
                       </div>
                     </div>
                   )}
-
-                  {globalResults.users.length === 0 && globalResults.publicChats.length === 0 && (
-                    <div className="text-center text-[#708499] text-xs py-8">
-                      نتیجه‌ای برای &quot;{searchQuery}&quot; یافت نشد.
-                    </div>
-                  )}
                 </>
               )}
+
+              {/* Empty state when no matches in active tab */}
+              {!isSearching &&
+                ((searchFilterTab === 'all' &&
+                  localSearchResults.matchedChats.length === 0 &&
+                  localSearchResults.matchedMessages.length === 0 &&
+                  globalResults.users.length === 0 &&
+                  globalResults.publicChats.length === 0) ||
+                  (searchFilterTab === 'chats' && localSearchResults.matchedChats.length === 0) ||
+                  (searchFilterTab === 'messages' && localSearchResults.matchedMessages.length === 0) ||
+                  (searchFilterTab === 'global' && globalResults.users.length === 0 && globalResults.publicChats.length === 0)) && (
+                  <div className="text-center text-[#708499] text-xs py-8">
+                    نتیجه‌ای برای &quot;{searchQuery}&quot; یافت نشد.
+                  </div>
+                )}
            </div>
         ) : (
           <div className="p-2 space-y-1">

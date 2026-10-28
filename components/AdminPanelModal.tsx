@@ -399,6 +399,24 @@ const handleExecutePanic = async () => {
     }
   };
 
+  const persistSmsToggle = async (patch: Partial<SystemConfig>) => {
+    try {
+      await onUpdateSystemConfig(patch);
+      setCfg(prev => ({ ...prev, ...patch }));
+      const token = getToken();
+      await fetch('/api/v1/admin/config', {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify(patch)
+      });
+    } catch (err) {
+      console.error('Error persisting SMS toggle:', err);
+    }
+  };
+
   const handleTestSms = async () => {
     if (!smsTestPhone.trim()) {
       alert('لطفاً شماره همراه جهت تست را وارد نمایید.');
@@ -420,7 +438,9 @@ const handleExecutePanic = async () => {
           smsLineNumber: smsLineNumber.trim(),
           smsSendMode,
           smsPatternCode: smsPatternCode.trim(),
-          smsPatternVarName: smsPatternVarName.trim() || 'code'
+          smsPatternVarName: smsPatternVarName.trim() || 'code',
+          smsFallbackEnabled,
+          otpCodeLength: Number(otpCodeLength) === 5 ? 5 : 6
         })
       });
       const data = await res.json();
@@ -1392,7 +1412,11 @@ const handleExecutePanic = async () => {
 
                   <button
                     type="button"
-                    onClick={() => setSmsOtpEnabled(prev => !prev)}
+                    onClick={() => {
+                      const next = !smsOtpEnabled;
+                      setSmsOtpEnabled(next);
+                      void persistSmsToggle({ smsOtpEnabled: next });
+                    }}
                     className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-hidden ${
                       smsOtpEnabled ? 'bg-emerald-500' : 'bg-gray-600'
                     }`}
@@ -1422,7 +1446,11 @@ const handleExecutePanic = async () => {
 
                   <button
                     type="button"
-                    onClick={() => setSmsFallbackEnabled(prev => !prev)}
+                    onClick={() => {
+                      const next = !smsFallbackEnabled;
+                      setSmsFallbackEnabled(next);
+                      void persistSmsToggle({ smsFallbackEnabled: next });
+                    }}
                     className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-hidden ${
                       smsFallbackEnabled ? 'bg-sky-500' : 'bg-gray-600'
                     }`}
@@ -1451,7 +1479,11 @@ const handleExecutePanic = async () => {
 
                   <button
                     type="button"
-                    onClick={() => setRequireVerifiedPhoneForMessaging(prev => !prev)}
+                    onClick={() => {
+                      const next = !requireVerifiedPhoneForMessaging;
+                      setRequireVerifiedPhoneForMessaging(next);
+                      void persistSmsToggle({ requireVerifiedPhoneForMessaging: next });
+                    }}
                     className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-hidden ${
                       requireVerifiedPhoneForMessaging ? 'bg-amber-500' : 'bg-gray-600'
                     }`}
