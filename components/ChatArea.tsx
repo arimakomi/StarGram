@@ -18,6 +18,14 @@ import { encryptMessage } from '../services/cryptoUtils';
 import { getUserPresence, formatSeenTime } from '../services/presenceUtils';
 import { resolveWallpaperStyle, WALLPAPER_PRESETS } from '../services/wallpaperPresets';
 import { APP_PREFERENCES_CHANGED, PREFERENCE_KEYS, readBooleanPreference } from '../services/appPreferences';
+import {
+  LONG_PRESS_DELAY_MS,
+  shouldCancelLongPressOnMove,
+  shouldCancelLongPressOnScroll,
+  shouldSuppressClickAfterLongPress,
+  shouldAllowContextMenuEvent,
+  clampContextMenuPosition,
+} from '../services/longPressUtils';
 
 interface ChatAreaProps {
   chat: Chat | null;
@@ -138,9 +146,28 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     };
     placement: 'above' | 'below';
   } | null>(null);
-  const longPressTimerRef = useRef<any>(null);
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const touchStartPosRef = useRef<{ x: number; y: number } | null>(null);
+  const touchStartScrollTopRef = useRef<number | null>(null);
+  const isTouchActiveRef = useRef<boolean>(false);
+  const touchMovedRef = useRef<boolean>(false);
   const isLongPressActiveRef = useRef<boolean>(false);
+  const isInitialLongPressTouchRef = useRef<boolean>(false);
+  const lastLongPressTimeRef = useRef<number>(0);
+  const messagesContainerRef = useRef<HTMLElement | null>(null);
+
+  const cancelLongPressTimer = () => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      cancelLongPressTimer();
+    };
+  }, [chat?.id]);
 
   // Voice Recording State
   const [isRecording, setIsRecording] = useState(false);
@@ -767,6 +794,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
 
   // Context Menu Handlers (Desktop Right-Click & Mobile Long-Press with Telegram-Style Focus)
   const openFocusedContextMenu = (targetEl: HTMLElement, msg: Message) => {
+    if (!targetEl || !targetEl.isConnected) return;
     const rect = targetEl.getBoundingClientRect();
     const isMe = msg.senderId === currentUser.id;
     const menuWidth = 232;
@@ -788,11 +816,16 @@ const ChatArea: React.FC<ChatAreaProps> = ({
 
     // Horizontal placement aligned with message bubble
     let x = isMe ? (rect.right - menuWidth) : rect.left;
-    x = Math.max(12, Math.min(window.innerWidth - menuWidth - 12, x));
+    const clamped = clampContextMenuPosition(
+      { x, y },
+      { width: menuWidth, height: estimatedMenuHeight },
+      { width: window.innerWidth, height: window.innerHeight },
+      12
+    );
 
     setContextMenu({
-      x,
-      y,
+      x: clamped.x,
+      y: clamped.y,
       message: msg,
       targetRect: {
         top: rect.top,
@@ -809,60 +842,111 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   const handleContextMenu = (e: React.MouseEvent, msg: Message) => {
     e.preventDefault();
     e.stopPropagation();
+    if (
+      !shouldAllowContextMenuEvent(
+        isTouchActiveRef.current,
+        touchMovedRef.current,
+        contextMenu?.message.id === msg.id
+      )
+    ) {
+      return;
+    }
     const targetEl = e.currentTarget as HTMLElement;
     openFocusedContextMenu(targetEl, msg);
   };
 
   const handleTouchStart = (e: React.TouchEvent, msg: Message) => {
+    if (e.touches.length !== 1) {
+      touchMovedRef.current = true;
+      cancelLongPressTimer();
+      return;
+    }
     const touch = e.touches[0];
     touchStartPosRef.current = { x: touch.clientX, y: touch.clientY };
+    touchStartScrollTopRef.current = messagesContainerRef.current?.scrollTop ?? 0;
+    isTouchActiveRef.current = true;
+    touchMovedRef.current = false;
     isLongPressActiveRef.current = false;
-    if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+    isInitialLongPressTouchRef.current = false;
+    cancelLongPressTimer();
 
     const targetEl = e.currentTarget as HTMLElement;
     longPressTimerRef.current = setTimeout(() => {
+      longPressTimerRef.current = null;
+      const currentScrollTop = messagesContainerRef.current?.scrollTop ?? 0;
+      if (
+        touchMovedRef.current ||
+        shouldCancelLongPressOnScroll(touchStartScrollTopRef.current, currentScrollTop) ||
+        !targetEl.isConnected
+      ) {
+        return;
+      }
       isLongPressActiveRef.current = true;
+      isInitialLongPressTouchRef.current = true;
+      lastLongPressTimeRef.current = Date.now();
       if (typeof navigator !== 'undefined' && navigator.vibrate) {
         try { navigator.vibrate(35); } catch {}
       }
       openFocusedContextMenu(targetEl, msg);
-    }, 320);
+    }, LONG_PRESS_DELAY_MS);
   };
 
   const handleTouchMove = (e: React.TouchEvent) => {
+    if (e.touches.length !== 1) {
+      touchMovedRef.current = true;
+      cancelLongPressTimer();
+      return;
+    }
     if (!touchStartPosRef.current) return;
     const touch = e.touches[0];
-    const dx = Math.abs(touch.clientX - touchStartPosRef.current.x);
-    const dy = Math.abs(touch.clientY - touchStartPosRef.current.y);
-    // Allow up to 16px micro-jitter before canceling long-press
-    if (dx > 16 || dy > 16) {
-      if (longPressTimerRef.current) {
-        clearTimeout(longPressTimerRef.current);
-        longPressTimerRef.current = null;
-      }
+    const currentScrollTop = messagesContainerRef.current?.scrollTop ?? 0;
+    if (
+      shouldCancelLongPressOnMove(touchStartPosRef.current, { x: touch.clientX, y: touch.clientY }) ||
+      shouldCancelLongPressOnScroll(touchStartScrollTopRef.current, currentScrollTop)
+    ) {
+      touchMovedRef.current = true;
+      cancelLongPressTimer();
     }
   };
 
-  const handleTouchEnd = (e: React.TouchEvent) => {
-    if (longPressTimerRef.current) {
-      clearTimeout(longPressTimerRef.current);
-      longPressTimerRef.current = null;
-    }
+  const handleTouchEnd = () => {
+    cancelLongPressTimer();
+    isTouchActiveRef.current = false;
     if (isLongPressActiveRef.current) {
-      e.preventDefault();
-      e.stopPropagation();
+      lastLongPressTimeRef.current = Date.now();
       isLongPressActiveRef.current = false;
+      setTimeout(() => {
+        isInitialLongPressTouchRef.current = false;
+      }, 80);
     }
     touchStartPosRef.current = null;
+    touchStartScrollTopRef.current = null;
   };
 
   const handleTouchCancel = () => {
-    if (longPressTimerRef.current) {
-      clearTimeout(longPressTimerRef.current);
-      longPressTimerRef.current = null;
-    }
+    cancelLongPressTimer();
+    isTouchActiveRef.current = false;
+    touchMovedRef.current = false;
     isLongPressActiveRef.current = false;
+    isInitialLongPressTouchRef.current = false;
     touchStartPosRef.current = null;
+    touchStartScrollTopRef.current = null;
+  };
+
+  const handleBubbleClickCapture = (e: React.MouseEvent) => {
+    if (shouldSuppressClickAfterLongPress(isLongPressActiveRef.current, lastLongPressTimeRef.current)) {
+      e.preventDefault();
+      e.stopPropagation();
+      isLongPressActiveRef.current = false;
+      lastLongPressTimeRef.current = 0;
+    }
+  };
+
+  const handleMessagesScroll = () => {
+    touchMovedRef.current = true;
+    cancelLongPressTimer();
+    if (contextMenu) setContextMenu(null);
+    if (activeReactionMsgId) setActiveReactionMsgId(null);
   };
 
   const renderMessageText = (text: string) => {
@@ -1291,8 +1375,9 @@ const ChatArea: React.FC<ChatAreaProps> = ({
 
       {/* Messages Feed */}
       <main 
-        className="flex-1 overflow-y-auto p-3 md:p-4 space-y-2 custom-scrollbar pb-8"
-        onScroll={() => { if (contextMenu) setContextMenu(null); }}
+        ref={messagesContainerRef}
+        className="flex-1 overflow-y-auto p-3 md:p-4 space-y-2 custom-scrollbar pb-8 touch-pan-y"
+        onScroll={handleMessagesScroll}
       >
         {filteredMessages.map((msg, index) => {
           const isMe = msg.senderId === currentUser.id;
@@ -1377,14 +1462,17 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                 {/* Message Bubble (With Right-Click and Mobile Long-Press) */}
                 <div 
                   dir="rtl"
-                  className={`relative max-w-full select-none transition-opacity duration-150 ${
+                  data-testid={`message-bubble-${msg.id}`}
+                  className={`relative max-w-full select-none touch-pan-y transition-opacity duration-150 ${
                     contextMenu?.message.id === msg.id ? 'opacity-0' : 'opacity-100'
                   }`}
                   style={{
                     WebkitTouchCallout: 'none',
                     WebkitUserSelect: 'none',
                     userSelect: 'none',
+                    touchAction: 'pan-y',
                   }}
+                  onClickCapture={handleBubbleClickCapture}
                   onContextMenu={(e) => handleContextMenu(e, msg)}
                   onTouchStart={(e) => handleTouchStart(e, msg)}
                   onTouchMove={handleTouchMove}
@@ -1424,8 +1512,14 @@ const ChatArea: React.FC<ChatAreaProps> = ({
       {/* Telegram-style Focused Message & Context Menu Overlay */}
       {contextMenu && (
         <div 
-          className="fixed inset-0 z-50 overflow-hidden select-none"
-          onClick={() => setContextMenu(null)}
+          data-testid="message-context-menu-backdrop"
+          className="fixed inset-0 z-[70] overflow-hidden select-none"
+          onTouchStart={() => { isInitialLongPressTouchRef.current = false; }}
+          onMouseDown={() => { isInitialLongPressTouchRef.current = false; }}
+          onClick={() => {
+            if (isInitialLongPressTouchRef.current) return;
+            setContextMenu(null);
+          }}
           onContextMenu={(e) => { e.preventDefault(); setContextMenu(null); }}
         >
           {/* Deep Dim & Blur Backdrop that blurs everything else */}
@@ -1449,6 +1543,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
 
           {/* Context Menu Floating Card */}
           <div 
+            data-testid="message-context-menu"
             className="fixed bg-[#17212b]/95 border border-white/10 rounded-2xl shadow-2xl p-2 w-[232px] space-y-1 animate-pop z-50 text-xs backdrop-blur-xl"
             style={{ top: `${contextMenu.y}px`, left: `${contextMenu.x}px` }}
             onClick={(e) => e.stopPropagation()}

@@ -12,6 +12,14 @@ import { compressImage } from '../services/imageUtils';
 import { StoriesBar } from './StoriesBar';
 import { getUserPresence } from '../services/presenceUtils';
 import { StarChatLogo } from './StarChatLogo';
+import {
+  LONG_PRESS_DELAY_MS,
+  shouldCancelLongPressOnMove,
+  shouldCancelLongPressOnScroll,
+  shouldSuppressClickAfterLongPress,
+  shouldAllowContextMenuEvent,
+  clampContextMenuPosition,
+} from '../services/longPressUtils';
 
 interface SidebarProps {
   chats: Chat[];
@@ -71,9 +79,16 @@ const Sidebar: React.FC<SidebarProps> = ({
   // Confirmation Modal State (Delete or Clear History)
   const [confirmModal, setConfirmModal] = useState<{ type: 'delete' | 'clear'; chat: Chat; deleteForBoth: boolean } | null>(null);
 
-  // Touch timer for mobile long-press
-  const touchTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const touchStartPos = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  // Touch timer and scroll/movement state for mobile long-press
+  const touchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const touchStartPos = useRef<{ x: number; y: number } | null>(null);
+  const touchStartScrollTopRef = useRef<number | null>(null);
+  const isTouchActiveRef = useRef<boolean>(false);
+  const touchMovedRef = useRef<boolean>(false);
+  const isLongPressActiveRef = useRef<boolean>(false);
+  const isInitialLongPressTouchRef = useRef<boolean>(false);
+  const lastLongPressTimeRef = useRef<number>(0);
+  const chatListContainerRef = useRef<HTMLDivElement | null>(null);
 
   // Group / Channel Creation State
   const [showCreateModal, setShowCreateModal] = useState<'group' | 'channel' | null>(null);
@@ -270,46 +285,151 @@ const Sidebar: React.FC<SidebarProps> = ({
     return () => clearTimeout(timer);
   }, [searchQuery, currentUser.id]);
 
-  const handleTouchStart = (e: React.TouchEvent, chat: Chat) => {
-    if (e.touches.length !== 1) return;
-    const touch = e.touches[0];
-    touchStartPos.current = { x: touch.clientX, y: touch.clientY };
-    if (touchTimerRef.current) clearTimeout(touchTimerRef.current);
-    touchTimerRef.current = setTimeout(() => {
-      setChatContextMenu({
-        x: touch.clientX,
-        y: touch.clientY,
-        chat
-      });
-    }, 450);
-  };
-
-  const handleTouchMove = (e: React.TouchEvent) => {
-    if (!touchTimerRef.current || e.touches.length !== 1) return;
-    const touch = e.touches[0];
-    const dx = Math.abs(touch.clientX - touchStartPos.current.x);
-    const dy = Math.abs(touch.clientY - touchStartPos.current.y);
-    if (dx > 10 || dy > 10) {
-      clearTimeout(touchTimerRef.current);
-      touchTimerRef.current = null;
-    }
-  };
-
-  const handleTouchEnd = () => {
+  const cancelTouchTimer = () => {
     if (touchTimerRef.current) {
       clearTimeout(touchTimerRef.current);
       touchTimerRef.current = null;
     }
   };
 
+  useEffect(() => {
+    return () => {
+      cancelTouchTimer();
+    };
+  }, []);
+
+  const openChatContextMenuAt = (x: number, y: number, chat: Chat) => {
+    const clamped = clampContextMenuPosition(
+      { x, y },
+      { width: 248, height: 310 },
+      { width: window.innerWidth, height: window.innerHeight },
+      12
+    );
+    setChatContextMenu({
+      x: clamped.x,
+      y: clamped.y,
+      chat,
+    });
+  };
+
+  const handleTouchStart = (e: React.TouchEvent, chat: Chat) => {
+    if (e.touches.length !== 1) {
+      touchMovedRef.current = true;
+      cancelTouchTimer();
+      return;
+    }
+    const touch = e.touches[0];
+    touchStartPos.current = { x: touch.clientX, y: touch.clientY };
+    touchStartScrollTopRef.current = chatListContainerRef.current?.scrollTop ?? 0;
+    isTouchActiveRef.current = true;
+    touchMovedRef.current = false;
+    isLongPressActiveRef.current = false;
+    isInitialLongPressTouchRef.current = false;
+    cancelTouchTimer();
+
+    const startX = touch.clientX;
+    const startY = touch.clientY;
+    touchTimerRef.current = setTimeout(() => {
+      touchTimerRef.current = null;
+      const currentScrollTop = chatListContainerRef.current?.scrollTop ?? 0;
+      if (
+        touchMovedRef.current ||
+        shouldCancelLongPressOnScroll(touchStartScrollTopRef.current, currentScrollTop)
+      ) {
+        return;
+      }
+      isLongPressActiveRef.current = true;
+      isInitialLongPressTouchRef.current = true;
+      lastLongPressTimeRef.current = Date.now();
+      if (typeof navigator !== 'undefined' && navigator.vibrate) {
+        try { navigator.vibrate(35); } catch {}
+      }
+      openChatContextMenuAt(startX, startY, chat);
+    }, LONG_PRESS_DELAY_MS);
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (e.touches.length !== 1) {
+      touchMovedRef.current = true;
+      cancelTouchTimer();
+      return;
+    }
+    if (!touchStartPos.current) return;
+    const touch = e.touches[0];
+    const currentScrollTop = chatListContainerRef.current?.scrollTop ?? 0;
+    if (
+      shouldCancelLongPressOnMove(touchStartPos.current, { x: touch.clientX, y: touch.clientY }) ||
+      shouldCancelLongPressOnScroll(touchStartScrollTopRef.current, currentScrollTop)
+    ) {
+      touchMovedRef.current = true;
+      cancelTouchTimer();
+    }
+  };
+
+  const handleTouchEnd = () => {
+    cancelTouchTimer();
+    isTouchActiveRef.current = false;
+    if (isLongPressActiveRef.current) {
+      lastLongPressTimeRef.current = Date.now();
+      isLongPressActiveRef.current = false;
+      setTimeout(() => {
+        isInitialLongPressTouchRef.current = false;
+      }, 80);
+    }
+    touchStartPos.current = null;
+    touchStartScrollTopRef.current = null;
+  };
+
+  const handleTouchCancel = () => {
+    cancelTouchTimer();
+    isTouchActiveRef.current = false;
+    touchMovedRef.current = false;
+    isLongPressActiveRef.current = false;
+    isInitialLongPressTouchRef.current = false;
+    touchStartPos.current = null;
+    touchStartScrollTopRef.current = null;
+  };
+
+  const handleChatRowClickCapture = (e: React.MouseEvent) => {
+    if (shouldSuppressClickAfterLongPress(isLongPressActiveRef.current, lastLongPressTimeRef.current)) {
+      e.preventDefault();
+      e.stopPropagation();
+      isLongPressActiveRef.current = false;
+      lastLongPressTimeRef.current = 0;
+    }
+  };
+
+  const handleChatRowSelect = (chat: Chat) => {
+    if (shouldSuppressClickAfterLongPress(isLongPressActiveRef.current, lastLongPressTimeRef.current)) {
+      isLongPressActiveRef.current = false;
+      lastLongPressTimeRef.current = 0;
+      return;
+    }
+    setActiveChatId(chat.id);
+    if (chat.unreadCount > 0 && onMarkReadChat) {
+      onMarkReadChat(chat.id);
+    }
+  };
+
+  const handleChatListScroll = () => {
+    touchMovedRef.current = true;
+    cancelTouchTimer();
+    if (chatContextMenu) setChatContextMenu(null);
+  };
+
   const handleContextMenu = (e: React.MouseEvent, chat: Chat) => {
     e.preventDefault();
     e.stopPropagation();
-    setChatContextMenu({
-      x: e.clientX,
-      y: e.clientY,
-      chat
-    });
+    if (
+      !shouldAllowContextMenuEvent(
+        isTouchActiveRef.current,
+        touchMovedRef.current,
+        chatContextMenu?.chat.id === chat.id
+      )
+    ) {
+      return;
+    }
+    openChatContextMenuAt(e.clientX, e.clientY, chat);
   };
 
   // Separate regular vs archived chats, apply folder filter & pinned sorting
@@ -477,7 +597,11 @@ const Sidebar: React.FC<SidebarProps> = ({
       </div>
 
       {/* Chat / Search Results List */}
-      <div className="flex-1 overflow-y-auto custom-scrollbar">
+      <div
+        ref={chatListContainerRef}
+        onScroll={handleChatListScroll}
+        className="flex-1 overflow-y-auto custom-scrollbar touch-pan-y"
+      >
         {searchQuery.trim().length >= 2 ? (
            <div className="p-2 space-y-3">
               {isSearching ? (
@@ -602,17 +726,21 @@ const Sidebar: React.FC<SidebarProps> = ({
                       return (
                         <div 
                           key={chat.id} 
-                          onClick={() => {
-                            setActiveChatId(chat.id);
-                            if (chat.unreadCount > 0 && onMarkReadChat) {
-                              onMarkReadChat(chat.id);
-                            }
-                          }} 
+                          data-testid={`chat-item-${chat.id}`}
+                          onClickCapture={handleChatRowClickCapture}
+                          onClick={() => handleChatRowSelect(chat)} 
                           onContextMenu={(e) => handleContextMenu(e, chat)}
                           onTouchStart={(e) => handleTouchStart(e, chat)}
                           onTouchMove={handleTouchMove}
                           onTouchEnd={handleTouchEnd}
-                          className={`flex items-center gap-3 p-2.5 rounded-xl cursor-pointer transition-all duration-150 active:scale-[0.98] select-none ${isSelected ? 'bg-[#3390ec] shadow-md shadow-[#3390ec]/20' : 'hover:bg-[#242f3d]/60'}`}
+                          onTouchCancel={handleTouchCancel}
+                          style={{
+                            WebkitTouchCallout: 'none',
+                            WebkitUserSelect: 'none',
+                            userSelect: 'none',
+                            touchAction: 'pan-y',
+                          }}
+                          className={`flex items-center gap-3 p-2.5 rounded-xl cursor-pointer transition-all duration-150 active:scale-[0.98] select-none touch-pan-y ${isSelected ? 'bg-[#3390ec] shadow-md shadow-[#3390ec]/20' : 'hover:bg-[#242f3d]/60'}`}
                         >
                           <div className="relative shrink-0">
                             {chat.type === 'saved' ? (
@@ -701,17 +829,21 @@ const Sidebar: React.FC<SidebarProps> = ({
               return (
                 <div 
                   key={chat.id} 
-                  onClick={() => {
-                    setActiveChatId(chat.id);
-                    if (chat.unreadCount > 0 && onMarkReadChat) {
-                      onMarkReadChat(chat.id);
-                    }
-                  }} 
+                  data-testid={`chat-item-${chat.id}`}
+                  onClickCapture={handleChatRowClickCapture}
+                  onClick={() => handleChatRowSelect(chat)} 
                   onContextMenu={(e) => handleContextMenu(e, chat)}
                   onTouchStart={(e) => handleTouchStart(e, chat)}
                   onTouchMove={handleTouchMove}
                   onTouchEnd={handleTouchEnd}
-                  className={`flex items-center gap-3 p-2.5 rounded-xl cursor-pointer transition-all duration-150 active:scale-[0.98] select-none ${isSelected ? 'bg-[#3390ec] shadow-md shadow-[#3390ec]/20' : 'hover:bg-[#242f3d]/60'}`}
+                  onTouchCancel={handleTouchCancel}
+                  style={{
+                    WebkitTouchCallout: 'none',
+                    WebkitUserSelect: 'none',
+                    userSelect: 'none',
+                    touchAction: 'pan-y',
+                  }}
+                  className={`flex items-center gap-3 p-2.5 rounded-xl cursor-pointer transition-all duration-150 active:scale-[0.98] select-none touch-pan-y ${isSelected ? 'bg-[#3390ec] shadow-md shadow-[#3390ec]/20' : 'hover:bg-[#242f3d]/60'}`}
                 >
                   <div className="relative shrink-0">
                     {chat.type === 'saved' ? (
@@ -1360,11 +1492,18 @@ const Sidebar: React.FC<SidebarProps> = ({
       {/* Chat Floating Context Menu (Right-Click & Mobile Long-Press) */}
       {chatContextMenu && (
         <div 
-          className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs animate-in fade-in"
-          onClick={() => setChatContextMenu(null)}
+          data-testid="chat-context-menu-backdrop"
+          className="fixed inset-0 z-[70] bg-black/40 backdrop-blur-xs animate-in fade-in"
+          onTouchStart={() => { isInitialLongPressTouchRef.current = false; }}
+          onMouseDown={() => { isInitialLongPressTouchRef.current = false; }}
+          onClick={() => {
+            if (isInitialLongPressTouchRef.current) return;
+            setChatContextMenu(null);
+          }}
           onContextMenu={(e) => { e.preventDefault(); setChatContextMenu(null); }}
         >
           <div 
+            data-testid="chat-context-menu"
             className="fixed bg-[#17212b] border border-white/10 rounded-2xl shadow-2xl p-1.5 w-60 space-y-0.5 animate-pop z-50 text-xs text-right"
             style={{
               top: `${Math.max(10, Math.min(chatContextMenu.y, window.innerHeight - 300))}px`,
