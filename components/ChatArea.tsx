@@ -11,9 +11,10 @@ import {
   Link as LinkIcon, Edit3, Shield, ShieldCheck, Copy, Users, Bookmark, RotateCcw, Clock, 
   ArrowRight, Search, Play, Pause, Download, Share2, Globe, Heart, ThumbsUp, Flame, Check,
   ZoomIn, ZoomOut, Phone, Bell, BellOff, Trash2, AtSign, FileText, CheckCircle2, Flag,
-  Eye, Calendar, Instagram, Palette, CheckCircle, RefreshCw, Camera
+  Eye, Calendar, Instagram, Palette, CheckCircle, RefreshCw, Camera, AlertTriangle
 } from 'lucide-react';
 import { compressImage } from '../services/imageUtils';
+import { validateFileSize, formatFileSize, normalizeMaxUploadMb } from '../services/fileUploadUtils';
 import { encryptMessage } from '../services/cryptoUtils';
 import { getUserPresence, formatSeenTime } from '../services/presenceUtils';
 import { resolveWallpaperStyle, WALLPAPER_PRESETS } from '../services/wallpaperPresets';
@@ -155,6 +156,31 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   
   // Right-Click & Mobile Long-Press Context Menu State
   const [copyToast, setCopyToast] = useState<string | null>(null);
+  const [uploadErrorToast, setUploadErrorToast] = useState<string | null>(null);
+  const uploadErrorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const showUploadError = (msg: string) => {
+    setUploadErrorToast(msg);
+    if (uploadErrorTimerRef.current) clearTimeout(uploadErrorTimerRef.current);
+    uploadErrorTimerRef.current = setTimeout(() => {
+      setUploadErrorToast(null);
+    }, 6000);
+  };
+
+  useEffect(() => {
+    const handleServerUploadError = (e: Event) => {
+      const customEvent = e as CustomEvent<{ message?: string }>;
+      if (customEvent.detail?.message) {
+        showUploadError(customEvent.detail.message);
+      }
+    };
+    window.addEventListener('starly:upload-error', handleServerUploadError);
+    return () => {
+      window.removeEventListener('starly:upload-error', handleServerUploadError);
+      if (uploadErrorTimerRef.current) clearTimeout(uploadErrorTimerRef.current);
+    };
+  }, []);
+
   const [contextMenu, setContextMenu] = useState<{
     x: number;
     y: number;
@@ -234,9 +260,9 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   const handleDrawerAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !chat) return;
-    const maxMb = systemConfig?.maxUploadSizeMb || 15;
-    if (file.size > maxMb * 1024 * 1024) {
-      alert(`حجم فایل انتخابی (${(file.size / (1024 * 1024)).toFixed(1)} مگابایت) از سقف مجاز (${maxMb} مگابایت) بیشتر است.`);
+    const sizeCheck = validateFileSize(file.size, systemConfig?.maxUploadSizeMb);
+    if (!sizeCheck.valid) {
+      showUploadError(sizeCheck.message!);
       if (e.target) e.target.value = '';
       return;
     }
@@ -253,7 +279,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
       });
     } catch (err) {
       console.error('Failed to upload chat avatar from drawer:', err);
-      alert('خطا در پردازش و بارگذاری تصویر');
+      showUploadError('خطا در پردازش و بارگذاری تصویر');
     } finally {
       setIsUpdatingDrawerAvatar(false);
       if (e.target) e.target.value = '';
@@ -693,32 +719,56 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (isBlockedByUnverifiedPhone) {
       setShowPhoneVerifyRequiredModal(true);
+      if (e.target) e.target.value = '';
       return;
     }
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const maxMb = systemConfig?.maxUploadSizeMb || 15;
-    if (file.size > maxMb * 1024 * 1024) {
-      alert(`حجم تصویر انتخابی (${(file.size / (1024 * 1024)).toFixed(1)} مگابایت) از سقف مجاز (${maxMb} مگابایت) بیشتر است.`);
+    const sizeCheck = validateFileSize(file.size, systemConfig?.maxUploadSizeMb);
+    if (!sizeCheck.valid) {
+      showUploadError(sizeCheck.message!);
       if (e.target) e.target.value = '';
       return;
     }
 
     try {
-      // Compress to lightweight canvas image (max 800px, 0.8 quality ~40KB)
-      const compressedDataUrl = await compressImage(file, 800, 800, 0.8);
-      // Clean send: send user caption if any, otherwise empty string (NO dummy 'تصویر' text!)
-      onAction('send', { 
-        text: inputText.trim() || '', 
-        imageUrl: compressedDataUrl,
-        replyToId: replyingTo?.id 
-      });
-      setInputText('');
-      setReplyingTo(null);
+      if (file.type.startsWith('image/')) {
+        // Compress to lightweight canvas image (max 800px, 0.8 quality ~40KB)
+        const compressedDataUrl = await compressImage(file, 800, 800, 0.8);
+        onAction('send', { 
+          text: inputText.trim() || '', 
+          imageUrl: compressedDataUrl,
+          fileName: file.name,
+          fileSize: file.size,
+          fileMimeType: file.type,
+          replyToId: replyingTo?.id 
+        });
+        setInputText('');
+        setReplyingTo(null);
+      } else {
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result || ''));
+          reader.onerror = () => reject(new Error('خطا در خواندن فایل'));
+          reader.readAsDataURL(file);
+        });
+        onAction('send', {
+          text: inputText.trim() || '',
+          fileUrl: dataUrl,
+          fileName: file.name,
+          fileSize: file.size,
+          fileMimeType: file.type || 'application/octet-stream',
+          replyToId: replyingTo?.id
+        });
+        setInputText('');
+        setReplyingTo(null);
+      }
     } catch (err) {
-      console.error("Image upload error:", err);
-      alert("خطا در پردازش تصویر");
+      console.error("File upload error:", err);
+      showUploadError("خطا در پردازش و بارگذاری فایل انتخابی");
+    } finally {
+      if (e.target) e.target.value = '';
     }
   };
 
@@ -736,18 +786,18 @@ const ChatArea: React.FC<ChatAreaProps> = ({
         recorder.ondataavailable = (e) => chunks.push(e.data);
         recorder.onstop = () => {
           const blob = new Blob(chunks, { type: 'audio/webm' });
-          const maxMb = systemConfig?.maxUploadSizeMb || 15;
-          if (blob.size > maxMb * 1024 * 1024) {
-            alert(`حجم فایل صوتی ضبط شده (${(blob.size / (1024 * 1024)).toFixed(1)} مگابایت) از سقف مجاز (${maxMb} مگابایت) بیشتر است.`);
+          const sizeCheck = validateFileSize(blob.size, systemConfig?.maxUploadSizeMb);
+          if (!sizeCheck.valid) {
+            showUploadError(sizeCheck.message!);
             stream.getTracks().forEach(t => t.stop());
             return;
           }
           const reader = new FileReader();
           reader.onloadend = () => {
-            // Clean send: send user caption if any, otherwise empty string (NO dummy 'پیام صوتی' text!)
             onAction('send', { 
               text: inputText.trim() || '', 
               audioUrl: reader.result,
+              fileSize: blob.size,
               replyToId: replyingTo?.id 
             });
             setInputText('');
@@ -759,7 +809,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
         recorder.start();
         setIsRecording(true);
       } catch (err) {
-        alert('دسترسی به میکروفون مسدود است.');
+        showUploadError('دسترسی به میکروفون مسدود است.');
       }
     } else {
       mediaRecorderRef.current?.stop();
@@ -1164,6 +1214,32 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                   />
                 ))}
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* General File Attachment Card */}
+        {msg.fileUrl && (
+          <div
+            data-testid="message-file-attachment"
+            className="flex items-center gap-3 p-2.5 rounded-xl bg-black/20 border border-white/10 min-w-[220px] max-w-[320px] my-1"
+          >
+            <a
+              href={msg.fileUrl}
+              download={msg.fileName || 'attachment'}
+              onClick={(e) => e.stopPropagation()}
+              className="w-10 h-10 rounded-xl bg-[#3390ec] hover:bg-[#2881d9] text-white flex items-center justify-center shrink-0 shadow-md transition-transform active:scale-95"
+              title="دانلود فایل"
+            >
+              <Download size={18} />
+            </a>
+            <div className="flex-1 min-w-0 text-right">
+              <p className="text-xs font-bold text-white truncate" dir="ltr">
+                {msg.fileName || 'فایل پیوست'}
+              </p>
+              <p className="text-[10px] text-white/70 font-mono tabular-nums mt-0.5" dir="ltr">
+                {msg.fileSize ? formatFileSize(msg.fileSize) : 'فایل قابل دانلود'}
+              </p>
             </div>
           </div>
         )}
@@ -1827,6 +1903,27 @@ const ChatArea: React.FC<ChatAreaProps> = ({
           </div>
         )}
 
+        {/* File Upload Size Error Toast */}
+        {uploadErrorToast && (
+          <div
+            data-testid="file-upload-error-toast"
+            className="flex items-center justify-between gap-2 bg-rose-500/15 border border-rose-500/30 text-rose-300 px-3.5 py-2.5 mb-2 rounded-xl text-xs animate-in fade-in slide-in-from-bottom-2 max-w-5xl mx-auto"
+          >
+            <div className="flex items-center gap-2">
+              <AlertTriangle size={16} className="text-rose-400 shrink-0" />
+              <span>{uploadErrorToast}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setUploadErrorToast(null)}
+              className="p-1 hover:bg-white/10 rounded-lg text-rose-300 hover:text-white shrink-0"
+              title="بستن"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        )}
+
         {/* Voice Recording Indicator */}
         {isRecording && (
           <div className="flex items-center justify-between bg-red-500/10 border border-red-500/20 p-2.5 mb-2 rounded-xl animate-pulse">
@@ -1921,7 +2018,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                   type="button"
                   onClick={() => {
                   if (!memberCanSendPolls) {
-                    alert('ارسال نظرسنجی در این گروه توسط مدیران محدود شده است.');
+                    showUploadError('ارسال نظرسنجی در این گروه توسط مدیران محدود شده است.');
                     return;
                   }
                   setShowPollModal(true);
@@ -1936,19 +2033,26 @@ const ChatArea: React.FC<ChatAreaProps> = ({
               {/* Attachment Button */}
               <button 
                 type="button"
+                data-testid="chat-attach-file-btn"
                 onClick={() => {
                   if (!memberCanSendMedia) {
-                    alert('ارسال رسانه و عکس در این گروه توسط مدیران محدود شده است.');
+                    showUploadError('ارسال رسانه و فایل در این گروه توسط مدیران محدود شده است.');
                     return;
                   }
                   fileInputRef.current?.click();
                 }} 
                 className="p-2 text-[#708499] hover:text-[#3390ec] transition-colors min-h-[40px] min-w-[40px] flex items-center justify-center"
-                title="ارسال تصویر"
+                title={`ارسال فایل یا تصویر (حداکثر ${normalizeMaxUploadMb(systemConfig?.maxUploadSizeMb, 50)} مگابایت)`}
               >
                 <Paperclip size={20}/>
               </button>
-              <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleImageUpload} />
+              <input
+                type="file"
+                ref={fileInputRef}
+                data-testid="chat-file-input"
+                className="hidden"
+                onChange={handleImageUpload}
+              />
             </div>
             
             <button 

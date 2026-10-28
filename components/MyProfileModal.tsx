@@ -10,6 +10,7 @@ import { compressImage } from '../services/imageUtils';
 import { generateLocalAvatarSvg } from '../services/avatarGenerator';
 import { authApi } from '../services/auth';
 import { cleanIranPhone, isValidIranPhone, sanitizeOtpCode, isValidOtpCode } from '../services/otpUtils';
+import { validateFileSize } from '../services/fileUploadUtils';
 
 interface MyProfileModalProps {
   user: User;
@@ -41,6 +42,7 @@ export const MyProfileModal: React.FC<MyProfileModalProps> = ({ user, onClose, o
   const [otpSimulated, setOtpSimulated] = useState<string | null>(null);
   const [otpTimer, setOtpTimer] = useState(0);
   const [otpSuccessToast, setOtpSuccessToast] = useState<string | null>(null);
+  const [avatarUploadError, setAvatarUploadError] = useState<string | null>(null);
   const expectedOtpLength = systemConfig?.otpCodeLength === 5 ? 5 : 6;
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -57,9 +59,10 @@ export const MyProfileModal: React.FC<MyProfileModalProps> = ({ user, onClose, o
   const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const maxMb = systemConfig?.maxUploadSizeMb || 15;
-      if (file.size > maxMb * 1024 * 1024) {
-        alert(`حجم تصویر انتخابی (${(file.size / (1024 * 1024)).toFixed(1)} مگابایت) از سقف مجاز (${maxMb} مگابایت) بیشتر است.`);
+      setAvatarUploadError(null);
+      const sizeCheck = validateFileSize(file.size, systemConfig?.maxUploadSizeMb);
+      if (!sizeCheck.valid) {
+        setAvatarUploadError(sizeCheck.message!);
         if (e.target) e.target.value = '';
         return;
       }
@@ -68,6 +71,9 @@ export const MyProfileModal: React.FC<MyProfileModalProps> = ({ user, onClose, o
         setAvatar(compressed);
       } catch (err) {
         console.error('Error compressing avatar:', err);
+        setAvatarUploadError('خطا در پردازش تصویر پروفایل');
+      } finally {
+        if (e.target) e.target.value = '';
       }
     }
   };
@@ -244,6 +250,13 @@ export const MyProfileModal: React.FC<MyProfileModalProps> = ({ user, onClose, o
             <div className="p-3 bg-emerald-500/15 border border-emerald-500/30 rounded-2xl text-emerald-400 text-xs font-bold flex items-center gap-2 animate-in">
               <CheckCircle2 size={16} />
               <span>{otpSuccessToast}</span>
+            </div>
+          )}
+
+          {avatarUploadError && (
+            <div data-testid="profile-upload-error-toast" className="p-3 bg-rose-500/15 border border-rose-500/30 rounded-2xl text-rose-300 text-xs font-bold flex items-center gap-2 animate-in">
+              <AlertCircle size={16} className="text-rose-400 shrink-0" />
+              <span>{avatarUploadError}</span>
             </div>
           )}
 

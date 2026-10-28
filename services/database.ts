@@ -105,7 +105,19 @@ async function api(path: string, init?: RequestInit) {
     ...init,
     headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) }
   });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  if (!res.ok) {
+    let serverMessage = '';
+    try {
+      const errBody = await res.json();
+      if (errBody && typeof errBody.message === 'string') {
+        serverMessage = errBody.message;
+      }
+    } catch {}
+    const err: any = new Error(serverMessage || `HTTP ${res.status}`);
+    err.status = res.status;
+    err.serverMessage = serverMessage;
+    throw err;
+  }
   return res.json();
 }
 
@@ -131,7 +143,31 @@ async function pushCollection(collectionName: string) {
   try {
     await api(`/api/db/${collectionName}/batch`, { method: 'POST', body: JSON.stringify({ upserts, deletes }) });
     synced.set(collectionName, nextSynced);
-  } catch (e) {
+  } catch (e: any) {
+    if (e && e.status === 413) {
+      // Revert rejected oversized upserts so they do not block future sync pushes
+      let reverted = false;
+      for (const id of Object.keys(upserts)) {
+        if (base[id]) {
+          try {
+            store[id] = JSON.parse(base[id]);
+            reverted = true;
+          } catch {}
+        } else {
+          delete store[id];
+          reverted = true;
+        }
+      }
+      if (reverted) emitChange(collectionName, false);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('starly:upload-error', {
+          detail: {
+            message: e.serverMessage || 'حجم فایل ارسالی فراتر از سقف مجاز سرور است.'
+          }
+        }));
+      }
+      return;
+    }
     console.warn(`Sync push failed for ${collectionName}, retrying…`, e);
     pushTimers.set(collectionName, setTimeout(() => pushCollection(collectionName), 4000));
   }

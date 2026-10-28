@@ -58,7 +58,8 @@ const App: React.FC = () => {
     allowStories: true,
     smsOtpEnabled: true,
     smsFallbackEnabled: true,
-    otpCodeLength: 6
+    otpCodeLength: 6,
+    maxUploadSizeMb: 50
   });
 
   useEffect(() => {
@@ -527,6 +528,10 @@ const App: React.FC = () => {
             text: payload.text || '',
             imageUrl: payload.imageUrl,
             audioUrl: payload.audioUrl,
+            fileUrl: payload.fileUrl,
+            fileName: payload.fileName,
+            fileSize: payload.fileSize,
+            fileMimeType: payload.fileMimeType,
             replyToId: payload.replyToId,
             poll: payload.poll,
             forwardedFrom: payload.forwardedFrom,
@@ -798,6 +803,10 @@ const App: React.FC = () => {
               text: message.text || '',
               imageUrl: message.imageUrl,
               audioUrl: message.audioUrl,
+              fileUrl: message.fileUrl,
+              fileName: message.fileName,
+              fileSize: message.fileSize,
+              fileMimeType: message.fileMimeType,
               poll: message.poll,
               forwardedFrom: message.forwardedFrom || origSender,
               timestamp: Date.now(),

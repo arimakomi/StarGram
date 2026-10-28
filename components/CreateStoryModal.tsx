@@ -2,6 +2,7 @@ import React, { useState, useRef } from 'react';
 import { User, SystemConfig } from '../types';
 import { X, Image as ImageIcon, Video as VideoIcon, Send, Sparkles, Clock, Palette, AlertCircle, Play, Pause } from 'lucide-react';
 import { compressImage } from '../services/imageUtils';
+import { validateFileSize } from '../services/fileUploadUtils';
 
 interface CreateStoryModalProps {
   currentUser: User;
@@ -54,9 +55,10 @@ export const CreateStoryModal: React.FC<CreateStoryModalProps> = ({
       return;
     }
 
-    const maxMb = systemConfig?.maxUploadSizeMb || 15;
-    if (file.size > maxMb * 1024 * 1024) {
-      setErrorMsg(`حجم تصویر انتخابی (${(file.size / (1024 * 1024)).toFixed(1)} مگابایت) از سقف مجاز (${maxMb} مگابایت) بیشتر است.`);
+    const sizeCheck = validateFileSize(file.size, systemConfig?.maxUploadSizeMb);
+    if (!sizeCheck.valid) {
+      setErrorMsg(sizeCheck.message!);
+      if (e.target) e.target.value = '';
       return;
     }
 
@@ -80,9 +82,10 @@ export const CreateStoryModal: React.FC<CreateStoryModalProps> = ({
       return;
     }
 
-    const maxMb = systemConfig?.maxUploadSizeMb || 15;
-    if (file.size > maxMb * 1024 * 1024) {
-      setErrorMsg(`حجم ویدیو نمی‌تواند بیش از ${maxMb} مگابایت باشد.`);
+    const sizeCheck = validateFileSize(file.size, systemConfig?.maxUploadSizeMb);
+    if (!sizeCheck.valid) {
+      setErrorMsg(sizeCheck.message!);
+      if (e.target) e.target.value = '';
       return;
     }
 

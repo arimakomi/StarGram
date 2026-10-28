@@ -1,6 +1,7 @@
 import React from 'react';
 import { Story, User } from '../types';
 import { Plus } from 'lucide-react';
+import { generateLocalAvatarSvg } from '../services/avatarGenerator';
 
 interface StoriesBarProps {
   stories: Story[];
@@ -49,7 +50,7 @@ export const StoriesBar: React.FC<StoriesBarProps> = ({
           >
             <div className="relative w-12 h-12 rounded-full p-[2px] bg-gradient-to-tr from-[#3390ec] to-[#5288c1] group-hover:scale-105 transition-transform flex items-center justify-center">
               <img
-                src={currentUser.avatar}
+                src={currentUser.avatar || generateLocalAvatarSvg(currentUser.displayName, currentUser.id)}
                 alt={currentUser.displayName}
                 className="w-full h-full rounded-full object-cover border-2 border-[#0e1621]"
               />
@@ -79,7 +80,7 @@ export const StoriesBar: React.FC<StoriesBarProps> = ({
               }`}
             >
               <img
-                src={latest.userAvatar}
+                src={latest.userAvatar || generateLocalAvatarSvg(latest.userName, userId)}
                 alt={latest.userName}
                 className="w-full h-full rounded-full object-cover border-2 border-[#0e1621]"
               />

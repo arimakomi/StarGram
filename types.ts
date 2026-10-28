@@ -37,6 +37,10 @@ export interface Message {
   reactions?: Reaction[];
   imageUrl?: string;
   audioUrl?: string;
+  fileUrl?: string;
+  fileName?: string;
+  fileSize?: number;
+  fileMimeType?: string;
   poll?: Poll;
   isRead?: boolean;
   forwardedFrom?: string;
@@ -220,7 +224,7 @@ export interface SystemConfig {
   allowChannelCreation?: boolean;
   allowPublicChannels?: boolean;
   allowStories?: boolean;
-  maxUploadSizeMb?: number; // Maximum upload file size in Megabytes (default: 15)
+  maxUploadSizeMb?: number; // Maximum upload file size in Megabytes (default: 50)
   defaultUserRole?: 'user' | string;
   geminiApiKey?: string;
   geminiEnabled?: boolean;

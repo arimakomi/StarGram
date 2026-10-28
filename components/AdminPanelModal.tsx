@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { User, Chat, MessageReport, SystemConfig, ApiToken } from '../types';
 import { 
   X, Shield, AlertOctagon, Sliders, Users, Flag, MessageSquare, AlertTriangle, 
@@ -6,7 +6,7 @@ import {
   Search, RefreshCw, Clock, Filter, Eye, EyeOff, Power,
   Database, Download, Upload, HardDrive, FileJson, RotateCcw, CheckCircle2,
   Bot, Sparkles, Globe, Copy, ExternalLink, Code2, PlusCircle, CheckCheck,
-  Smartphone, Phone, Send, ShieldCheck
+  Smartphone, Phone, Send, ShieldCheck, BarChart3, Award
 } from 'lucide-react';
 import { getToken } from '../services/auth';
 import { compressImage } from '../services/imageUtils';
@@ -15,6 +15,8 @@ import {
   getAllDatabaseCollectionsData, restoreAllDatabaseCollectionsData, getRawCollectionStore, clearAllDatabaseData
 } from '../services/database';
 import { StarChatLogo, STARCHAT_LOGO_URL, STARCHAT_MINIMAL_LOGO_URL } from './StarChatLogo';
+import { normalizeMaxUploadMb, calculateStorageAnalytics, formatFileSize } from '../services/fileUploadUtils';
+import { generateLocalAvatarSvg } from '../services/avatarGenerator';
 
 interface AdminPanelModalProps {
   currentUser: User;
@@ -107,9 +109,85 @@ const handleExecutePanic = async () => {
   const fileInputRefBanner = useRef<HTMLInputElement>(null);
 
   // Max Upload Size Configuration State (in MB)
-  const [maxUploadSizeMb, setMaxUploadSizeMb] = useState<number>(systemConfig.maxUploadSizeMb || 15);
+  const [maxUploadSizeMb, setMaxUploadSizeMb] = useState<number>(() => normalizeMaxUploadMb(systemConfig.maxUploadSizeMb, 50));
   const [isSavingMaxUploadSize, setIsSavingMaxUploadSize] = useState(false);
   const [maxUploadSaveSuccess, setMaxUploadSaveSuccess] = useState(false);
+  const [maxUploadSaveError, setMaxUploadSaveError] = useState('');
+
+  useEffect(() => {
+    if (systemConfig.maxUploadSizeMb !== undefined) {
+      setMaxUploadSizeMb(normalizeMaxUploadMb(systemConfig.maxUploadSizeMb, 50));
+    }
+    setCfg(systemConfig);
+  }, [systemConfig]);
+
+  // Storage Analytics State (Total storage bar chart & Top 5 storage-consuming users)
+  const [storageCollections, setStorageCollections] = useState<{
+    users: Record<string, any>;
+    chats: Record<string, any>;
+    stories: Record<string, any>;
+  }>(() => {
+    const localAll = getAllDatabaseCollectionsData();
+    return {
+      users: localAll.users || {},
+      chats: localAll.chats || {},
+      stories: localAll.stories || {}
+    };
+  });
+  const [loadingStorageAnalytics, setLoadingStorageAnalytics] = useState(false);
+
+  const loadStorageAnalytics = useCallback(async () => {
+    setLoadingStorageAnalytics(true);
+    try {
+      const localAll = getAllDatabaseCollectionsData();
+      const mergedUsers: Record<string, any> = { ...(localAll.users || {}) };
+      const mergedChats: Record<string, any> = { ...(localAll.chats || {}) };
+      const mergedStories: Record<string, any> = { ...(localAll.stories || {}) };
+
+      const token = getToken();
+      if (token) {
+        const headers = { Authorization: `Bearer ${token}` };
+        const [uRes, cRes, sRes] = await Promise.all([
+          fetch('/api/db/users?since=0', { headers }).catch(() => null),
+          fetch('/api/db/chats?since=0', { headers }).catch(() => null),
+          fetch('/api/db/stories?since=0', { headers }).catch(() => null)
+        ]);
+        if (uRes && uRes.ok) {
+          const uData = await uRes.json().catch(() => null);
+          if (uData?.docs) Object.assign(mergedUsers, uData.docs);
+        }
+        if (cRes && cRes.ok) {
+          const cData = await cRes.json().catch(() => null);
+          if (cData?.docs) Object.assign(mergedChats, cData.docs);
+        }
+        if (sRes && sRes.ok) {
+          const sData = await sRes.json().catch(() => null);
+          if (sData?.docs) Object.assign(mergedStories, sData.docs);
+        }
+      }
+
+      setStorageCollections({
+        users: mergedUsers,
+        chats: mergedChats,
+        stories: mergedStories
+      });
+    } catch (e) {
+      console.error('Error loading storage analytics:', e);
+    } finally {
+      setLoadingStorageAnalytics(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === 'system' || activeTab === 'database') {
+      void loadStorageAnalytics();
+    }
+  }, [activeTab, loadStorageAnalytics]);
+
+  const storageAnalytics = useMemo(
+    () => calculateStorageAnalytics(storageCollections),
+    [storageCollections]
+  );
 
   // SMS & OTP (Iran Payamak) State
   const [smsOtpEnabled, setSmsOtpEnabled] = useState<boolean>(systemConfig.smsOtpEnabled !== false);
@@ -288,10 +366,13 @@ const handleExecutePanic = async () => {
     }
   };
 
-  const handleSaveMaxUploadSize = async () => {
+  const handleSaveMaxUploadSize = async (overrideMb?: number) => {
     setIsSavingMaxUploadSize(true);
+    setMaxUploadSaveError('');
     try {
-      const val = Math.max(1, Math.min(100, Number(maxUploadSizeMb) || 15));
+      const targetVal = overrideMb !== undefined ? overrideMb : maxUploadSizeMb;
+      const val = normalizeMaxUploadMb(targetVal, 50);
+      setMaxUploadSizeMb(val);
       const updatedConfig: Partial<SystemConfig> = { maxUploadSizeMb: val };
       await onUpdateSystemConfig(updatedConfig);
       setCfg(prev => ({ ...prev, ...updatedConfig }));
@@ -308,7 +389,7 @@ const handleExecutePanic = async () => {
       setTimeout(() => setMaxUploadSaveSuccess(false), 3000);
     } catch (e) {
       console.error('Error saving max upload size:', e);
-      alert('خطا در ذخیره سقف حجم آپلود');
+      setMaxUploadSaveError('خطا در ذخیره سقف حجم آپلود');
     } finally {
       setIsSavingMaxUploadSize(false);
     }
@@ -1115,62 +1196,96 @@ const handleExecutePanic = async () => {
             </div>
 
             {/* Max Upload Size Configuration Card */}
-            <div className="bg-[#0e1621] border border-[#242f3d] rounded-2xl p-5 space-y-4">
-              <div className="flex items-center justify-between">
+            <div data-testid="admin-max-upload-card" className="bg-[#0e1621] border border-[#242f3d] rounded-2xl p-5 space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2.5">
                   <div className="w-8 h-8 rounded-xl bg-sky-500/15 text-sky-400 flex items-center justify-center border border-sky-500/30">
                     <HardDrive className="w-4 h-4" />
                   </div>
                   <div>
-                    <h3 className="text-sm font-bold text-gray-200">
-                      حداکثر سقف مجاز آپلود کاربران (Max Upload Size)
+                    <h3 className="text-sm font-bold text-gray-200 flex items-center gap-2">
+                      <span>سیستم مدیریت حجم فایل‌های ارسالی کاربران</span>
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded-lg bg-sky-500/15 text-sky-300 border border-sky-500/30 tabular-nums">
+                        سقف فعال: {normalizeMaxUploadMb(cfg.maxUploadSizeMb, 50)} MB
+                      </span>
                     </h3>
                     <p className="text-xs text-gray-400 mt-0.5">
-                      کنترل سقف حجم برای ارسال تصاویر چت، فایل‌های صوتی، استوری‌ها و آواتارها در پیام‌رسان و API
+                      تعیین سقف حجم مجاز برای ارسال انواع فایل، تصویر، پیام صوتی، استوری و آواتار (بررسی همزمان در سمت کلاینت هنگام انتخاب فایل و سمت سرور هنگام دریافت)
                     </p>
                   </div>
                 </div>
 
                 {maxUploadSaveSuccess && (
-                  <span className="text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-3 py-1 rounded-xl flex items-center gap-1.5 animate-in fade-in">
+                  <span
+                    data-testid="admin-upload-save-toast"
+                    className="text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-3 py-1 rounded-xl flex items-center gap-1.5 animate-in fade-in"
+                  >
                     <CheckCircle2 className="w-3.5 h-3.5" />
-                    ذخیره شد
+                    سقف حجم ({maxUploadSizeMb} مگابایت) ذخیره شد
                   </span>
                 )}
               </div>
 
-              <div className="p-4 bg-[#17212b] rounded-xl border border-[#242f3d] space-y-3">
+              <div className="p-4 bg-[#17212b] rounded-xl border border-[#242f3d] space-y-4">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <div>
-                    <label className="text-xs font-semibold text-white">حداکثر حجم فایل (مگابایت):</label>
+                    <label htmlFor="admin-max-upload-input" className="text-xs font-semibold text-white">
+                      سقف حجم مجاز هر فایل ارسالی (مگابایت):
+                    </label>
                     <p className="text-[11px] text-gray-400 mt-0.5">
-                      فایل‌های بزرگتر از این مقدار در کلاینت و سرور مسدود شده و خطای ۴۱۳ برمی‌گردانند.
+                      فایل‌های بزرگتر از این مقدار هنگام انتخاب در کلاینت مسدود شده و در صورت ارسال به سرور با کد خطای ۴۱۳ رد می‌شوند.
                     </p>
                   </div>
 
                   <div className="flex items-center gap-2 shrink-0">
                     <input
+                      id="admin-max-upload-input"
+                      data-testid="admin-max-upload-input"
                       type="number"
                       min={1}
-                      max={100}
+                      max={500}
                       value={maxUploadSizeMb}
-                      onChange={(e) => setMaxUploadSizeMb(Math.max(1, Math.min(100, parseInt(e.target.value) || 1)))}
-                      className="w-24 bg-[#0e1621] border border-[#242f3d] rounded-xl px-3 py-2 text-xs font-mono font-bold text-center text-white focus:outline-hidden focus:border-[#5288c1]"
+                      onChange={(e) => setMaxUploadSizeMb(Math.max(1, Math.min(500, parseInt(e.target.value, 10) || 1)))}
+                      className="w-24 bg-[#0e1621] border border-[#242f3d] rounded-xl px-3 py-2 text-xs font-mono font-bold text-center text-white focus:outline-hidden focus:border-[#5288c1] tabular-nums"
                       dir="ltr"
                     />
                     <span className="text-xs font-bold text-gray-300">مگابایت (MB)</span>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2 pt-1">
-                  {[5, 10, 15, 25, 50].map((presetMb) => (
+                {/* Interactive Range Slider */}
+                <div className="space-y-1.5">
+                  <input
+                    data-testid="admin-max-upload-slider"
+                    type="range"
+                    min={1}
+                    max={200}
+                    step={1}
+                    value={Math.min(200, maxUploadSizeMb)}
+                    onChange={(e) => setMaxUploadSizeMb(Number(e.target.value))}
+                    className="w-full accent-[#5288c1] cursor-pointer h-1.5 bg-[#0e1621] rounded-lg"
+                  />
+                  <div className="flex justify-between text-[10px] text-gray-500 font-mono tabular-nums" dir="ltr">
+                    <span>1 MB</span>
+                    <span>50 MB</span>
+                    <span>100 MB</span>
+                    <span>150 MB</span>
+                    <span>200 MB</span>
+                  </div>
+                </div>
+
+                {/* Preset Quick-Select Buttons */}
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  <span className="text-[11px] text-gray-400 ml-1">مقادیر پیشنهادی:</span>
+                  {[1, 5, 15, 25, 50, 100, 200].map((presetMb) => (
                     <button
                       key={presetMb}
                       type="button"
-                      onClick={() => setMaxUploadSizeMb(presetMb)}
-                      className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-colors ${
+                      data-testid={`admin-upload-preset-${presetMb}`}
+                      onClick={() => void handleSaveMaxUploadSize(presetMb)}
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-colors tabular-nums ${
                         maxUploadSizeMb === presetMb
-                          ? 'bg-[#5288c1] text-white'
+                          ? 'bg-[#5288c1] text-white shadow-xs'
                           : 'bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white'
                       }`}
                     >
@@ -1179,10 +1294,19 @@ const handleExecutePanic = async () => {
                   ))}
                 </div>
 
-                <div className="pt-2 flex justify-end">
+                {maxUploadSaveError && (
+                  <p className="text-xs text-rose-400">{maxUploadSaveError}</p>
+                )}
+
+                <div className="pt-2 flex items-center justify-between border-t border-white/5">
+                  <span className="text-[11px] text-gray-400 flex items-center gap-1.5">
+                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                    اعمال آنی در کلاینت و سرور
+                  </span>
                   <button
                     type="button"
-                    onClick={handleSaveMaxUploadSize}
+                    data-testid="admin-save-max-upload-btn"
+                    onClick={() => void handleSaveMaxUploadSize()}
                     disabled={isSavingMaxUploadSize}
                     className="px-5 py-2 bg-[#5288c1] hover:bg-[#4375a8] disabled:opacity-50 text-white rounded-xl text-xs font-semibold transition-all flex items-center gap-2 shadow-xs shadow-[#5288c1]/30 active:scale-95"
                   >
@@ -1190,6 +1314,280 @@ const handleExecutePanic = async () => {
                     <span>ذخیره سقف حجم آپلود</span>
                   </button>
                 </div>
+              </div>
+            </div>
+
+            {/* Storage Consumption Bar Chart & Top 5 Users Section */}
+            <div data-testid="admin-storage-analytics-section" className="bg-[#0e1621] border border-[#242f3d] rounded-2xl p-5 space-y-5">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-xl bg-emerald-500/15 text-emerald-400 flex items-center justify-center border border-emerald-500/30">
+                    <BarChart3 className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-gray-200 flex items-center gap-2">
+                      <span>نمودار مصرف فضای ذخیره‌سازی و ۵ کاربر پرمصرف</span>
+                      <span
+                        data-testid="admin-total-storage-badge"
+                        className="text-[10px] font-mono px-2 py-0.5 rounded-lg bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 tabular-nums"
+                        dir="ltr"
+                      >
+                        {storageAnalytics.formattedTotalSize}
+                      </span>
+                    </h3>
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      تحلیل مجموع فضای مصرف‌شده توسط آپلود فایل‌ها، تصاویر، پیام‌های صوتی، استوری‌ها و تصاویر پروفایل در کل برنامه
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  data-testid="admin-refresh-storage-btn"
+                  onClick={() => void loadStorageAnalytics()}
+                  disabled={loadingStorageAnalytics}
+                  className="px-3 py-1.5 bg-[#17212b] hover:bg-[#242f3d] text-gray-300 hover:text-white border border-[#242f3d] rounded-xl text-xs font-semibold transition-colors flex items-center gap-1.5"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${loadingStorageAnalytics ? 'animate-spin text-sky-400' : 'text-gray-400'}`} />
+                  <span>بروزرسانی آمار</span>
+                </button>
+              </div>
+
+              {/* KPI Summary Strip */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="p-3.5 bg-[#17212b] rounded-xl border border-[#242f3d] flex items-center justify-between">
+                  <div>
+                    <span className="text-[11px] text-gray-400 block">مجموع حجم آپلودهای کل برنامه</span>
+                    <span
+                      data-testid="admin-total-storage-bytes"
+                      className="text-base font-bold font-mono text-white mt-0.5 block tabular-nums"
+                      dir="ltr"
+                    >
+                      {storageAnalytics.formattedTotalSize}
+                    </span>
+                  </div>
+                  <span className="text-[10px] font-mono text-sky-400 bg-sky-500/10 border border-sky-500/20 px-2 py-1 rounded-lg tabular-nums" dir="ltr">
+                    {storageAnalytics.totalBytes.toLocaleString('en-US')} B
+                  </span>
+                </div>
+
+                <div className="p-3.5 bg-[#17212b] rounded-xl border border-[#242f3d] flex items-center justify-between">
+                  <div>
+                    <span className="text-[11px] text-gray-400 block">تعداد کل فایل‌ها و رسانه‌ها</span>
+                    <span
+                      data-testid="admin-total-uploaded-files"
+                      className="text-base font-bold text-white mt-0.5 flex items-baseline gap-1.5 tabular-nums"
+                    >
+                      <span className="font-mono">{storageAnalytics.totalFilesCount}</span>
+                      <span className="text-xs font-semibold text-gray-300">فایل</span>
+                    </span>
+                  </div>
+                  <HardDrive className="w-5 h-5 text-emerald-400/70" />
+                </div>
+
+                <div className="p-3.5 bg-[#17212b] rounded-xl border border-[#242f3d] flex items-center justify-between">
+                  <div>
+                    <span className="text-[11px] text-gray-400 block">کاربران دارای فایل آپلودی</span>
+                    <span
+                      data-testid="admin-uploading-users-count"
+                      className="text-base font-bold text-white mt-0.5 flex items-baseline gap-1.5 tabular-nums"
+                    >
+                      <span className="font-mono">{storageAnalytics.uploadingUsersCount}</span>
+                      <span className="text-xs font-semibold text-gray-300">کاربر</span>
+                    </span>
+                  </div>
+                  <Users className="w-5 h-5 text-amber-400/70" />
+                </div>
+              </div>
+
+              {/* Bar Chart of Total Storage Consumed */}
+              <div
+                data-testid="admin-storage-bar-chart"
+                className="p-4 bg-[#17212b] rounded-xl border border-[#242f3d] space-y-3"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <h4 className="text-xs font-bold text-gray-200 flex items-center gap-1.5">
+                    <BarChart3 className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                    <span>نمودار میله‌ای تفکیک فضای ذخیره‌سازی مصرف‌شده در کل برنامه</span>
+                  </h4>
+                  <span className="text-[11px] text-gray-400 font-mono tabular-nums shrink-0" dir="ltr">
+                    Total: {storageAnalytics.formattedTotalSize}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-5 gap-1.5 sm:gap-3 pt-3 items-end h-48 px-2 pb-2 bg-[#0e1621]/80 rounded-xl border border-[#242f3d]">
+                  {storageAnalytics.categories.map((cat) => {
+                    const barColorMap: Record<string, string> = {
+                      files: 'bg-sky-500 bg-gradient-to-t from-blue-600 to-sky-400 border-sky-300/50 shadow-sm shadow-sky-500/20',
+                      images: 'bg-emerald-500 bg-gradient-to-t from-teal-600 to-emerald-400 border-emerald-300/50 shadow-sm shadow-emerald-500/20',
+                      audio: 'bg-amber-500 bg-gradient-to-t from-orange-600 to-amber-400 border-amber-300/50 shadow-sm shadow-amber-500/20',
+                      stories: 'bg-purple-500 bg-gradient-to-t from-fuchsia-600 to-purple-400 border-purple-300/50 shadow-sm shadow-purple-500/20',
+                      avatars: 'bg-rose-500 bg-gradient-to-t from-pink-600 to-rose-400 border-rose-300/50 shadow-sm shadow-rose-500/20'
+                    };
+                    const colorClasses = barColorMap[cat.key] || barColorMap.files;
+
+                    return (
+                      <div
+                        key={cat.key}
+                        data-testid={`admin-storage-bar-${cat.key}`}
+                        data-bytes={cat.bytes}
+                        className="flex flex-col items-center justify-end h-full gap-1.5 min-w-0"
+                      >
+                        <div className="text-center">
+                          <span className="block text-[10px] font-mono font-bold text-white tabular-nums" dir="ltr">
+                            {cat.formattedSize}
+                          </span>
+                          <span className="block text-[9px] font-mono text-gray-400 tabular-nums" dir="ltr">
+                            {cat.percentageOfTotal}%
+                          </span>
+                        </div>
+
+                        <div className="w-full max-w-[46px] h-24 bg-[#17212b] rounded-t-lg border border-white/10 flex items-end overflow-hidden p-0.5">
+                          <div
+                            data-testid={`admin-storage-bar-fill-${cat.key}`}
+                            className={`w-full rounded-t-md ${colorClasses} border-t transition-all duration-300`}
+                            style={{ height: `${cat.bytes > 0 ? Math.max(12, cat.barHeightPercent) : 3}%`, opacity: cat.bytes > 0 ? 1 : 0.2 }}
+                          />
+                        </div>
+
+                        <div className="text-center pt-0.5 w-full min-w-0">
+                          <span className="block text-[9px] sm:text-[10px] font-semibold text-gray-200 truncate w-full px-0.5">
+                            {cat.label}
+                          </span>
+                          <span className="block text-[9px] text-gray-400 tabular-nums">
+                            <span className="font-mono">{cat.fileCount}</span> فایل
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Top 5 Storage-Consuming Users List */}
+              <div
+                data-testid="admin-top-storage-users"
+                className="p-4 bg-[#17212b] rounded-xl border border-[#242f3d] space-y-3"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <h4 className="text-xs font-bold text-gray-200 flex items-center gap-1.5">
+                    <Award className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                    <span>فهرست ۵ کاربر پرمصرف فضای ذخیره‌سازی (Top 5 Storage-Consuming Users)</span>
+                  </h4>
+                  <span className="text-[11px] text-gray-400 shrink-0">
+                    بر اساس مجموع حجم فایل‌های ارسالی
+                  </span>
+                </div>
+
+                {storageAnalytics.topUsers.length === 0 ? (
+                  <div
+                    data-testid="admin-top-users-empty"
+                    className="py-6 text-center text-xs text-gray-400 bg-[#0e1621]/60 rounded-xl border border-[#242f3d]/60"
+                  >
+                    هنوز هیچ فایل یا رسانه‌ای توسط کاربران آپلود نشده است.
+                  </div>
+                ) : (
+                  <div className="space-y-2.5">
+                    {storageAnalytics.topUsers.map((u, idx) => {
+                      const topMaxBytes = storageAnalytics.topUsers[0]?.totalBytes || 1;
+                      const relativeWidth = Math.max(6, Math.round((u.totalBytes / topMaxBytes) * 100));
+                      const rankStyles = [
+                        'bg-amber-500/20 text-amber-300 border-amber-500/40',
+                        'bg-slate-400/20 text-slate-200 border-slate-400/40',
+                        'bg-orange-500/20 text-orange-300 border-orange-500/40',
+                        'bg-sky-500/15 text-sky-300 border-sky-500/30',
+                        'bg-purple-500/15 text-purple-300 border-purple-500/30'
+                      ];
+                      const avatarSrc = u.avatar || generateLocalAvatarSvg(u.displayName, u.userId);
+
+                      return (
+                        <div
+                          key={u.userId}
+                          data-testid={`admin-top-user-row-${idx}`}
+                          data-user-id={u.userId}
+                          data-total-bytes={u.totalBytes}
+                          className="p-3 bg-[#0e1621] rounded-xl border border-[#242f3d] space-y-2"
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <span
+                                className={`w-6 h-6 rounded-lg text-[11px] font-mono font-bold flex items-center justify-center border shrink-0 tabular-nums ${
+                                  rankStyles[idx] || rankStyles[3]
+                                }`}
+                              >
+                                #{idx + 1}
+                              </span>
+                              <img
+                                src={avatarSrc}
+                                alt={u.displayName}
+                                className="w-8 h-8 rounded-full object-cover border border-white/10 shrink-0"
+                              />
+                              <div className="min-w-0">
+                                <div className="text-xs font-bold text-white truncate flex items-center gap-1.5">
+                                  <span className="truncate">{u.displayName}</span>
+                                  <span className="text-[10px] font-mono text-gray-400 shrink-0" dir="ltr">
+                                    @{u.username}
+                                  </span>
+                                </div>
+                                <div className="flex flex-wrap items-center gap-2 text-[10px] text-gray-400 mt-0.5">
+                                  <span>
+                                    <span className="font-mono">{u.fileCount}</span> فایل ارسالی
+                                  </span>
+                                  {u.breakdown.filesBytes > 0 && (
+                                    <span className="text-sky-300">
+                                      اسناد: <span className="font-mono" dir="ltr">{formatFileSize(u.breakdown.filesBytes)}</span>
+                                    </span>
+                                  )}
+                                  {u.breakdown.imagesBytes > 0 && (
+                                    <span className="text-emerald-300">
+                                      تصاویر: <span className="font-mono" dir="ltr">{formatFileSize(u.breakdown.imagesBytes)}</span>
+                                    </span>
+                                  )}
+                                  {u.breakdown.audioBytes > 0 && (
+                                    <span className="text-amber-300">
+                                      صوتی: <span className="font-mono" dir="ltr">{formatFileSize(u.breakdown.audioBytes)}</span>
+                                    </span>
+                                  )}
+                                  {u.breakdown.storiesBytes > 0 && (
+                                    <span className="text-purple-300">
+                                      استوری: <span className="font-mono" dir="ltr">{formatFileSize(u.breakdown.storiesBytes)}</span>
+                                    </span>
+                                  )}
+                                  {u.breakdown.avatarsBytes > 0 && (
+                                    <span className="text-rose-300">
+                                      پروفایل: <span className="font-mono" dir="ltr">{formatFileSize(u.breakdown.avatarsBytes)}</span>
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="text-left shrink-0">
+                              <span
+                                data-testid={`admin-top-user-size-${idx}`}
+                                className="block text-xs font-mono font-bold text-emerald-400 tabular-nums"
+                                dir="ltr"
+                              >
+                                {u.formattedSize}
+                              </span>
+                              <span className="block text-[10px] text-gray-400 tabular-nums">
+                                <span className="font-mono" dir="ltr">{u.percentageOfTotal}%</span> کل فضا
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* User Consumption Progress Bar */}
+                          <div className="w-full h-1.5 bg-[#17212b] rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-[#5288c1] bg-gradient-to-r from-[#5288c1] to-emerald-400 rounded-full transition-all duration-300"
+                              style={{ width: `${relativeWidth}%` }}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             </div>
 

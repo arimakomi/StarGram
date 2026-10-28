@@ -549,12 +549,37 @@ async function ensureAdmin({ reset }) {
       otpCodeLength: 6,
       otpExpiresInMinutes: 2,
       requireVerifiedPhoneForMessaging: false,
+      maxUploadSizeMb: 50,
       geminiEnabled: false,
       geminiApiKey: '',
       geminiProxyUrl: '',
       geminiModel: 'gemini-2.5-flash'
     }, now);
   }
+}
+
+function estimateBase64DecodedBytes(dataUrlOrBase64) {
+  if (!dataUrlOrBase64 || typeof dataUrlOrBase64 !== 'string') return 0;
+  const trimmed = dataUrlOrBase64.trim();
+  if (!trimmed || trimmed.startsWith('http://') || trimmed.startsWith('https://') || trimmed.startsWith('/')) return 0;
+  const commaIdx = trimmed.indexOf(',');
+  const base64Part = commaIdx !== -1 ? trimmed.slice(commaIdx + 1) : trimmed;
+  if (commaIdx !== -1 && !trimmed.slice(0, commaIdx).includes(';base64')) {
+    return Buffer.byteLength(base64Part, 'utf8');
+  }
+  const cleanLen = base64Part.replace(/\s+/g, '').length;
+  if (!cleanLen) return 0;
+  let padding = 0;
+  if (base64Part.endsWith('==')) padding = 2;
+  else if (base64Part.endsWith('=')) padding = 1;
+  return Math.max(0, Math.floor((cleanLen * 3) / 4) - padding);
+}
+
+async function getSystemMaxUploadMb() {
+  const sysConfig = await dbAdapter.getDoc('system_config', 'main') || {};
+  const val = Number(sysConfig.maxUploadSizeMb);
+  if (!Number.isFinite(val) || val <= 0) return 50;
+  return Math.max(1, Math.min(500, val));
 }
 
 // ───────────── محدودیت تلاش ورود ─────────────
@@ -573,7 +598,17 @@ const noteFail = (key) => {
 const app = express();
 app.disable('x-powered-by');
 app.set('trust proxy', 'loopback');
-app.use(express.json({ limit: '50mb' }));
+app.use(express.json({ limit: '150mb' }));
+app.use((err, req, res, next) => {
+  if (err && (err.type === 'entity.too.large' || err.status === 413)) {
+    return res.status(413).json({
+      success: false,
+      code: 'FILE_TOO_LARGE',
+      message: 'حجم فایل ارسالی بیش از سقف مجاز سرور است.'
+    });
+  }
+  next(err);
+});
 
 const syncStreamsByUser = new Map();
 function closeUserSyncStreams(userId) {
@@ -653,7 +688,7 @@ app.get('/api/public-config', wrap(async (req, res) => {
       otpCodeLength: cfg.otpCodeLength === 5 ? 5 : 6,
       otpExpiresInMinutes: Number(cfg.otpExpiresInMinutes) || 2,
       requireVerifiedPhoneForMessaging: Boolean(cfg.requireVerifiedPhoneForMessaging),
-      maxUploadSizeMb: Number(cfg.maxUploadSizeMb) || 15
+      maxUploadSizeMb: Number(cfg.maxUploadSizeMb) || 50
     }
   });
 }));
@@ -1250,7 +1285,7 @@ app.get('/api/db/:collection', auth, wrap(async (req, res) => {
   for (const r of rows) {
     if (r.deleted) { deleted.push(r.doc_id); continue; }
     const d = typeof r.data === 'string' ? JSON.parse(r.data) : r.data;
-    if (c === 'chats' && !(Array.isArray(d.participantIds) && d.participantIds.includes(req.user.id))) continue;
+    if (c === 'chats' && !admin && !(Array.isArray(d.participantIds) && d.participantIds.includes(req.user.id))) continue;
     if (c === 'user_sessions' && !admin && d.userId !== req.user.id) continue;
     if (c === 'reports' && !admin) continue;
     docs[r.doc_id] = c === 'users' ? publicUser(d) : d;
@@ -1267,6 +1302,9 @@ app.post('/api/db/:collection/batch', auth, wrap(async (req, res) => {
   const deletes = Array.isArray(req.body?.deletes) ? req.body.deletes : [];
   const now = Date.now();
 
+  const maxMb = (c === 'chats' || c === 'stories' || c === 'users') ? await getSystemMaxUploadMb() : 50;
+  const maxBytes = Math.floor(maxMb * 1024 * 1024);
+
   for (const [id, incoming] of Object.entries(upserts)) {
     if (id.length > 191 || !incoming || typeof incoming !== 'object') continue;
     let data = incoming;
@@ -1281,9 +1319,68 @@ app.post('/api/db/:collection/batch', auth, wrap(async (req, res) => {
       const was = existingChat ? existingChat.participantIds : null;
       const member = (arr) => Array.isArray(arr) && arr.includes(req.user.id);
       if (!(member(incoming.participantIds) && (!was || member(was))) && !(was && member(was))) continue;
+
+      // بررسی سقف حجم فایل‌های ارسالی در پیام‌های جدید و تصویر گروه
+      const existingMsgIds = new Set(Array.isArray(existingChat?.messages) ? existingChat.messages.map(m => m.id) : []);
+      const incomingMsgs = Array.isArray(incoming.messages) ? incoming.messages : [];
+      for (const msg of incomingMsgs) {
+        if (!msg || existingMsgIds.has(msg.id)) continue;
+        const declaredBytes = Number(msg.fileSize) || 0;
+        const payloadBytes = Math.max(
+          declaredBytes,
+          estimateBase64DecodedBytes(msg.fileUrl),
+          estimateBase64DecodedBytes(msg.imageUrl),
+          estimateBase64DecodedBytes(msg.audioUrl)
+        );
+        if (payloadBytes > maxBytes) {
+          const actualMb = (payloadBytes / (1024 * 1024)).toFixed(1);
+          return res.status(413).json({
+            success: false,
+            code: 'FILE_TOO_LARGE',
+            maxUploadSizeMb: maxMb,
+            message: `حجم فایل ارسالی (${actualMb} مگابایت) بیشتر از سقف مجاز تعیین‌شده توسط مدیر (${maxMb} مگابایت) است.`
+          });
+        }
+      }
+      if (incoming.groupAvatar && incoming.groupAvatar !== existingChat?.groupAvatar) {
+        const avatarBytes = estimateBase64DecodedBytes(incoming.groupAvatar);
+        if (avatarBytes > maxBytes) {
+          const actualMb = (avatarBytes / (1024 * 1024)).toFixed(1);
+          return res.status(413).json({
+            success: false,
+            code: 'FILE_TOO_LARGE',
+            maxUploadSizeMb: maxMb,
+            message: `حجم تصویر گروه/کانال (${actualMb} مگابایت) بیشتر از سقف مجاز (${maxMb} مگابایت) است.`
+          });
+        }
+      }
+    }
+    if (c === 'stories') {
+      const mediaBytes = estimateBase64DecodedBytes(incoming.mediaUrl);
+      if (mediaBytes > maxBytes) {
+        const actualMb = (mediaBytes / (1024 * 1024)).toFixed(1);
+        return res.status(413).json({
+          success: false,
+          code: 'FILE_TOO_LARGE',
+          maxUploadSizeMb: maxMb,
+          message: `حجم فایل استوری (${actualMb} مگابایت) بیشتر از سقف مجاز تعیین‌شده توسط مدیر (${maxMb} مگابایت) است.`
+        });
+      }
     }
     if (c === 'users') {
       const existing = await dbAdapter.getDoc('users', id);
+      if (incoming.avatar && incoming.avatar !== existing?.avatar) {
+        const avatarBytes = estimateBase64DecodedBytes(incoming.avatar);
+        if (avatarBytes > maxBytes) {
+          const actualMb = (avatarBytes / (1024 * 1024)).toFixed(1);
+          return res.status(413).json({
+            success: false,
+            code: 'FILE_TOO_LARGE',
+            maxUploadSizeMb: maxMb,
+            message: `حجم تصویر پروفایل (${actualMb} مگابایت) بیشتر از سقف مجاز (${maxMb} مگابایت) است.`
+          });
+        }
+      }
       data = { ...incoming };
       const plain = typeof data.password === 'string' ? data.password : null;
       delete data.password; delete data.passwordHash;
@@ -1699,13 +1796,16 @@ app.patch('/api/v1/users/:id', auth, wrap(async (req, res) => {
   if (body.bio !== undefined) user.bio = String(body.bio).slice(0, 300);
   if (body.phone !== undefined) user.phone = String(body.phone).slice(0, 30);
   if (body.avatar !== undefined) {
-    const sysConfig = await dbAdapter.getDoc('system_config', 'main') || {};
-    const maxMb = Number(sysConfig.maxUploadSizeMb) || 15;
-    const maxBytes = maxMb * 1024 * 1024;
-    if (typeof body.avatar === 'string' && body.avatar.length > maxBytes * 1.37) {
+    const maxMb = await getSystemMaxUploadMb();
+    const maxBytes = Math.floor(maxMb * 1024 * 1024);
+    const avatarBytes = estimateBase64DecodedBytes(body.avatar);
+    if (avatarBytes > maxBytes) {
+      const actualMb = (avatarBytes / (1024 * 1024)).toFixed(1);
       return res.status(413).json({
         success: false,
-        message: `حجم تصویر آواتار فراتر از سقف مجاز تعیین شده توسط مدیریت (${maxMb} مگابایت) است.`
+        code: 'FILE_TOO_LARGE',
+        maxUploadSizeMb: maxMb,
+        message: `حجم تصویر آواتار (${actualMb} مگابایت) فراتر از سقف مجاز تعیین شده توسط مدیریت (${maxMb} مگابایت) است.`
       });
     }
     user.avatar = body.avatar;
@@ -1839,20 +1939,28 @@ app.post('/api/v1/chats/:id/messages', auth, wrap(async (req, res) => {
     return res.status(403).json({ success: false, message: 'اجازه ارسال پیام در این گفتگو را ندارید.' });
   }
 
-  const { text = '', imageUrl, audioUrl, poll, replyToId } = req.body || {};
-  if (!text && !imageUrl && !audioUrl && !poll) {
-    return res.status(400).json({ success: false, message: 'محتوای پیام (متن، تصویر، صدا یا نظرسنجی) الزامی است.' });
+  const { text = '', imageUrl, audioUrl, fileUrl, fileName, fileSize, fileMimeType, poll, replyToId } = req.body || {};
+  if (!text && !imageUrl && !audioUrl && !fileUrl && !poll) {
+    return res.status(400).json({ success: false, message: 'محتوای پیام (متن، تصویر، فایل، صدا یا نظرسنجی) الزامی است.' });
   }
 
   // بررسی حداکثر حجم مجاز آپلود تعیین‌شده در تنظیمات سیستم
-  const sysConfig = await dbAdapter.getDoc('system_config', 'main') || {};
-  const maxMb = Number(sysConfig.maxUploadSizeMb) || 15;
-  const maxBytes = maxMb * 1024 * 1024;
-  const mediaPayload = (imageUrl || '') + (audioUrl || '');
-  if (mediaPayload && mediaPayload.length > maxBytes * 1.37) {
+  const maxMb = await getSystemMaxUploadMb();
+  const maxBytes = Math.floor(maxMb * 1024 * 1024);
+  const declaredBytes = Number(fileSize) || 0;
+  const payloadBytes = Math.max(
+    declaredBytes,
+    estimateBase64DecodedBytes(fileUrl),
+    estimateBase64DecodedBytes(imageUrl),
+    estimateBase64DecodedBytes(audioUrl)
+  );
+  if (payloadBytes > maxBytes) {
+    const actualMb = (payloadBytes / (1024 * 1024)).toFixed(1);
     return res.status(413).json({
       success: false,
-      message: `حجم رسانه ارسالی فراتر از حداکثر مجاز تعیین شده توسط مدیریت (${maxMb} مگابایت) است.`
+      code: 'FILE_TOO_LARGE',
+      maxUploadSizeMb: maxMb,
+      message: `حجم فایل ارسالی (${actualMb} مگابایت) فراتر از حداکثر مجاز تعیین شده توسط مدیریت (${maxMb} مگابایت) است.`
     });
   }
 
@@ -1863,6 +1971,10 @@ app.post('/api/v1/chats/:id/messages', auth, wrap(async (req, res) => {
     text: String(text || ''),
     imageUrl: imageUrl || undefined,
     audioUrl: audioUrl || undefined,
+    fileUrl: fileUrl || undefined,
+    fileName: fileName ? String(fileName).slice(0, 255) : undefined,
+    fileSize: declaredBytes || (payloadBytes > 0 ? payloadBytes : undefined),
+    fileMimeType: fileMimeType ? String(fileMimeType).slice(0, 120) : undefined,
     poll: poll || undefined,
     replyToId: replyToId || undefined,
     timestamp: now,
@@ -1877,6 +1989,32 @@ app.post('/api/v1/chats/:id/messages', auth, wrap(async (req, res) => {
   await dbAdapter.putDoc('chats', req.params.id, chat, now);
   notifyChatChanged(chat);
   res.status(201).json({ success: true, message: 'پیام با موفقیت ارسال شد.', messageData: newMsg });
+}));
+
+// بررسی مستقیم حجم فایل در سمت سرور هنگام آپلود
+app.post(['/api/files/validate', '/api/v1/files/validate'], auth, wrap(async (req, res) => {
+  const { fileName = '', fileSize = 0, dataUrl = '' } = req.body || {};
+  const maxMb = await getSystemMaxUploadMb();
+  const maxBytes = Math.floor(maxMb * 1024 * 1024);
+  const actualBytes = Math.max(Number(fileSize) || 0, estimateBase64DecodedBytes(dataUrl));
+  if (actualBytes > maxBytes) {
+    const actualMb = (actualBytes / (1024 * 1024)).toFixed(1);
+    return res.status(413).json({
+      success: false,
+      code: 'FILE_TOO_LARGE',
+      maxUploadSizeMb: maxMb,
+      fileName,
+      fileSizeBytes: actualBytes,
+      message: `حجم فایل ارسالی (${actualMb} مگابایت) بیشتر از سقف مجاز تعیین‌شده توسط مدیر (${maxMb} مگابایت) است.`
+    });
+  }
+  res.json({
+    success: true,
+    maxUploadSizeMb: maxMb,
+    maxBytes,
+    fileSizeBytes: actualBytes,
+    message: 'حجم فایل در محدوده مجاز سرور است.'
+  });
 }));
 
 app.delete('/api/v1/chats/:id/messages/:msgId', auth, wrap(async (req, res) => {
