@@ -4,12 +4,19 @@ import {
   X, Camera, User as UserIcon, Phone, AtSign, Info, 
   Check, Shield, Sparkles, RefreshCw, Image as ImageIcon, FileText, Mic,
   Calendar, Send, Instagram, CheckCircle2, AlertCircle, Loader2,
-  ShieldCheck, Smartphone
+  ShieldCheck, Smartphone, Copy
 } from 'lucide-react';
 import { compressImage } from '../services/imageUtils';
 import { generateLocalAvatarSvg } from '../services/avatarGenerator';
 import { authApi } from '../services/auth';
-import { cleanIranPhone, isValidIranPhone, sanitizeOtpCode, isValidOtpCode } from '../services/otpUtils';
+import {
+  cleanIranPhone,
+  isValidIranPhone,
+  sanitizeOtpCode,
+  isValidOtpCode,
+  formatOtpFullError,
+  FormattedOtpError
+} from '../services/otpUtils';
 import { validateFileSize } from '../services/fileUploadUtils';
 
 interface MyProfileModalProps {
@@ -39,6 +46,8 @@ export const MyProfileModal: React.FC<MyProfileModalProps> = ({ user, onClose, o
   const [otpModalStep, setOtpModalStep] = useState<'phone' | 'code'>('phone');
   const [otpLoading, setOtpLoading] = useState(false);
   const [otpError, setOtpError] = useState('');
+  const [otpFullError, setOtpFullError] = useState<FormattedOtpError | null>(null);
+  const [copiedOtpError, setCopiedOtpError] = useState(false);
   const [otpSimulated, setOtpSimulated] = useState<string | null>(null);
   const [otpTimer, setOtpTimer] = useState(0);
   const [otpSuccessToast, setOtpSuccessToast] = useState<string | null>(null);
@@ -88,6 +97,7 @@ export const MyProfileModal: React.FC<MyProfileModalProps> = ({ user, onClose, o
     const rawTarget = overridePhone !== undefined ? overridePhone : newPhoneInput;
     const normalized = cleanIranPhone(rawTarget);
     if (!isValidIranPhone(normalized)) {
+      setOtpFullError(null);
       setOtpError('شماره همراه نامعتبر است (مثال: 09121234567)');
       return;
     }
@@ -95,6 +105,7 @@ export const MyProfileModal: React.FC<MyProfileModalProps> = ({ user, onClose, o
     setNewPhoneInput(normalized);
     setOtpLoading(true);
     setOtpError('');
+    setOtpFullError(null);
     setOtpSimulated(null);
 
     try {
@@ -109,7 +120,9 @@ export const MyProfileModal: React.FC<MyProfileModalProps> = ({ user, onClose, o
       // 2. ارسال کد OTP
       const res = await authApi.sendOtp(normalized, 'verify', user.id);
       if (!res.success) {
-        setOtpError(res.message || 'خطا در ارسال کد تایید');
+        const formatted = formatOtpFullError(res);
+        setOtpError(formatted.summary);
+        setOtpFullError(formatted);
         setOtpLoading(false);
         return;
       }
@@ -122,9 +135,14 @@ export const MyProfileModal: React.FC<MyProfileModalProps> = ({ user, onClose, o
       } else {
         setOtpCodeInput('');
       }
-    } catch (err) {
+      if (res.gatewayFailed && (res.errorDetails || res.gatewayError)) {
+        setOtpFullError(formatOtpFullError(res));
+      }
+    } catch (err: any) {
       console.error(err);
-      setOtpError('خطا در برقراری ارتباط با سرور.');
+      const formatted = formatOtpFullError(err);
+      setOtpError(formatted.summary || 'خطا در برقراری ارتباط با سرور.');
+      setOtpFullError(formatted);
     } finally {
       setOtpLoading(false);
     }
@@ -136,6 +154,7 @@ export const MyProfileModal: React.FC<MyProfileModalProps> = ({ user, onClose, o
     setNewPhoneInput(initialPhone || phone || '');
     setOtpCodeInput('');
     setOtpError('');
+    setOtpFullError(null);
     setOtpSimulated(null);
     setOtpModalStep('phone');
     setShowOtpModal(true);
@@ -151,12 +170,14 @@ export const MyProfileModal: React.FC<MyProfileModalProps> = ({ user, onClose, o
     const normalized = cleanIranPhone(newPhoneInput);
     const code = sanitizeOtpCode(otpCodeInput, expectedOtpLength);
     if (!isValidOtpCode(code)) {
+      setOtpFullError(null);
       setOtpError(`کد ${expectedOtpLength === 5 ? '۵' : '۶'} رقمی را به طور کامل وارد کنید`);
       return;
     }
 
     setOtpLoading(true);
     setOtpError('');
+    setOtpFullError(null);
 
     try {
       const res = await authApi.verifyOtp({
@@ -167,7 +188,9 @@ export const MyProfileModal: React.FC<MyProfileModalProps> = ({ user, onClose, o
       });
 
       if (!res.success) {
-        setOtpError(res.message || 'کد تایید نادرست است.');
+        const formatted = formatOtpFullError(res);
+        setOtpError(formatted.summary || 'کد تایید نادرست است.');
+        setOtpFullError(formatted);
         return;
       }
 
@@ -182,12 +205,21 @@ export const MyProfileModal: React.FC<MyProfileModalProps> = ({ user, onClose, o
       setShowOtpModal(false);
       setOtpSuccessToast('شماره همراه شما با موفقیت تایید و ثبت شد!');
       setTimeout(() => setOtpSuccessToast(null), 3500);
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      setOtpError('خطا در تایید شماره.');
+      const formatted = formatOtpFullError(err);
+      setOtpError(formatted.summary || 'خطا در تایید شماره.');
+      setOtpFullError(formatted);
     } finally {
       setOtpLoading(false);
     }
+  };
+
+  const handleCopyProfileOtpError = () => {
+    if (!otpFullError) return;
+    navigator.clipboard?.writeText(otpFullError.technicalReport).catch(() => {});
+    setCopiedOtpError(true);
+    setTimeout(() => setCopiedOtpError(false), 2000);
   };
 
   const handleSave = async (e: React.FormEvent) => {
@@ -527,7 +559,7 @@ export const MyProfileModal: React.FC<MyProfileModalProps> = ({ user, onClose, o
           onClick={() => setShowOtpModal(false)}
         >
           <div 
-            className="w-full max-w-sm bg-[#17212b] rounded-3xl overflow-hidden shadow-2xl border border-white/10 p-6 space-y-4 animate-pop text-right"
+            className="w-full max-w-sm bg-[#17212b] rounded-3xl overflow-hidden shadow-2xl border border-white/10 p-6 space-y-4 animate-pop text-right max-h-[90vh] overflow-y-auto"
             dir="rtl"
             onClick={e => e.stopPropagation()}
           >
@@ -592,7 +624,7 @@ export const MyProfileModal: React.FC<MyProfileModalProps> = ({ user, onClose, o
                   </div>
                   <button
                     type="button"
-                    onClick={() => { setOtpModalStep('phone'); setOtpError(''); }}
+                    onClick={() => { setOtpModalStep('phone'); setOtpError(''); setOtpFullError(null); }}
                     className="text-[#3390ec] hover:underline text-[11px] font-bold"
                   >
                     تغییر شماره
@@ -661,10 +693,49 @@ export const MyProfileModal: React.FC<MyProfileModalProps> = ({ user, onClose, o
 
             {/* Error Message */}
             {otpError && (
-              <p className="text-red-400 text-xs text-center font-medium bg-red-400/10 p-2 rounded-xl border border-red-400/20 flex items-center justify-center gap-1">
-                <AlertCircle size={14} className="shrink-0" />
-                <span>{otpError}</span>
-              </p>
+              <div
+                data-testid="profile-otp-error-alert"
+                className="text-red-400 text-xs font-medium bg-red-400/10 p-2.5 rounded-xl border border-red-400/20 flex items-start gap-1.5"
+              >
+                <AlertCircle size={14} className="shrink-0 mt-0.5" />
+                <span className="leading-relaxed break-words">{otpError}</span>
+              </div>
+            )}
+
+            {/* Complete Diagnostic Error Details Box */}
+            {otpFullError && otpFullError.hasTechnicalDetails && (
+              <div
+                data-testid="profile-otp-full-error-box"
+                className="bg-[#0e1621] border border-rose-500/35 rounded-2xl p-3 text-[11px] text-rose-200 space-y-2"
+              >
+                <div className="flex items-center justify-between gap-2 border-b border-white/10 pb-1.5">
+                  <span className="font-bold text-rose-300 flex items-center gap-1.5">
+                    <AlertCircle size={13} className="text-rose-400 shrink-0" />
+                    <span>جزئیات کامل خطای ارسال پیامک</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleCopyProfileOtpError}
+                    className="px-2 py-0.5 rounded-lg bg-white/5 hover:bg-white/10 text-gray-300 text-[10px] flex items-center gap-1 transition-colors"
+                  >
+                    {copiedOtpError ? <Check size={11} className="text-emerald-400" /> : <Copy size={11} />}
+                    <span>{copiedOtpError ? 'کپی شد' : 'کپی خطا'}</span>
+                  </button>
+                </div>
+
+                {otpFullError.statusLine && (
+                  <div className="font-mono text-[10px] text-amber-300 bg-amber-500/10 px-2 py-1 rounded-lg break-all" dir="ltr">
+                    {otpFullError.statusLine}
+                  </div>
+                )}
+
+                <pre
+                  className="text-[10px] font-mono text-gray-300 bg-black/40 p-2 rounded-xl overflow-x-auto max-h-36 whitespace-pre-wrap break-all leading-relaxed"
+                  dir="ltr"
+                >
+                  {otpFullError.technicalReport}
+                </pre>
+              </div>
             )}
           </div>
         </div>
@@ -674,3 +745,4 @@ export const MyProfileModal: React.FC<MyProfileModalProps> = ({ user, onClose, o
 };
 
 export default MyProfileModal;
+

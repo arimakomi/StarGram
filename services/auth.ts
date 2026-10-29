@@ -18,10 +18,41 @@ async function call(path: string, init?: RequestInit & { json?: any }) {
       headers,
       body: init?.json !== undefined ? JSON.stringify(init.json) : undefined
     });
-    const data = await res.json().catch(() => ({}));
-    return { ok: res.ok, status: res.status, ...data };
-  } catch {
-    return { ok: false, status: 0, success: false, message: 'ارتباط با سرور برقرار نشد.' };
+    const rawText = await res.text().catch(() => '');
+    let data: any = {};
+    if (rawText) {
+      try {
+        data = JSON.parse(rawText);
+      } catch {
+        data = {
+          message: `پاسخ غیر JSON از سرور (HTTP ${res.status} ${res.statusText || ''})`.trim(),
+          rawBody: rawText.slice(0, 2000)
+        };
+      }
+    }
+    return {
+      ok: res.ok,
+      status: res.status,
+      statusText: res.statusText,
+      ...data
+    };
+  } catch (err: any) {
+    return {
+      ok: false,
+      status: 0,
+      success: false,
+      message: `ارتباط با سرور برقرار نشد: ${err?.message || 'خطای شبکه'}`,
+      error: err?.message || 'Network Error',
+      errorDetails: {
+        endpoint: path,
+        method: init?.method || 'GET',
+        networkError: {
+          name: err?.name || 'FetchError',
+          message: err?.message || 'Failed to fetch',
+          cause: err?.cause ? String(err.cause?.message || err.cause) : undefined
+        }
+      }
+    };
   }
 }
 

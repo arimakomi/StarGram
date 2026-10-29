@@ -1,6 +1,9 @@
 export const DEFAULT_MAX_UPLOAD_MB = 50;
 export const MIN_MAX_UPLOAD_MB = 1;
 export const MAX_MAX_UPLOAD_MB = 500;
+export const UPLOAD_SLIDER_MIN_MB = MIN_MAX_UPLOAD_MB;
+export const UPLOAD_SLIDER_MAX_MB = MAX_MAX_UPLOAD_MB;
+export const UPLOAD_SLIDER_TICKS_MB = [1, 50, 100, 200, 300, 400, 500] as const;
 
 export function normalizeMaxUploadMb(value: unknown, fallback: number = DEFAULT_MAX_UPLOAD_MB): number {
   const num = typeof value === 'number' ? value : Number(value);
@@ -8,6 +11,17 @@ export function normalizeMaxUploadMb(value: unknown, fallback: number = DEFAULT_
     return fallback;
   }
   return Math.max(MIN_MAX_UPLOAD_MB, Math.min(MAX_MAX_UPLOAD_MB, Math.round(num * 10) / 10));
+}
+
+export function getUploadSliderPercentage(
+  valueMb: unknown,
+  minMb: number = UPLOAD_SLIDER_MIN_MB,
+  maxMb: number = UPLOAD_SLIDER_MAX_MB
+): number {
+  const normalized = normalizeMaxUploadMb(valueMb, DEFAULT_MAX_UPLOAD_MB);
+  const clamped = Math.max(minMb, Math.min(maxMb, normalized));
+  if (maxMb <= minMb) return 0;
+  return Math.round(((clamped - minMb) / (maxMb - minMb)) * 10000) / 100;
 }
 
 export function formatFileSize(bytes?: number | null): string {
@@ -293,23 +307,35 @@ export function calculateStorageAnalytics(input: StorageAnalyticsInput): Storage
       if (msg.id) seenMessageKeys.add(msgKey);
 
       const senderId = String(msg.senderId || 'unknown');
+      const explicitFileSize =
+        typeof msg.fileSize === 'number' && Number.isFinite(msg.fileSize) && msg.fileSize > 0
+          ? msg.fileSize
+          : 0;
+      const hasExplicitDocument = Boolean(msg.fileUrl || msg.fileName);
 
-      // File attachment
-      const explicitFileSize = typeof msg.fileSize === 'number' && Number.isFinite(msg.fileSize) && msg.fileSize > 0 ? msg.fileSize : 0;
-      const decodedFileBytes = msg.fileUrl ? estimateDataUrlDecodedBytes(msg.fileUrl) : 0;
-      const fileBytes = explicitFileSize > 0 ? explicitFileSize : decodedFileBytes;
-      if (fileBytes > 0) {
-        categoryTotals.files.bytes += fileBytes;
-        categoryTotals.files.count += 1;
-        const st = ensureUserStat(senderId);
-        st.totalBytes += fileBytes;
-        st.fileCount += 1;
-        st.breakdown.filesBytes += fileBytes;
+      // File / Document attachment (do NOT double-count when fileSize is set on a voice/image-only message)
+      if (hasExplicitDocument || (!msg.imageUrl && !msg.audioUrl && explicitFileSize > 0)) {
+        const decodedFileBytes = msg.fileUrl ? estimateDataUrlDecodedBytes(msg.fileUrl) : 0;
+        const fileBytes = explicitFileSize > 0 ? explicitFileSize : decodedFileBytes;
+        if (fileBytes > 0) {
+          categoryTotals.files.bytes += fileBytes;
+          categoryTotals.files.count += 1;
+          const st = ensureUserStat(senderId);
+          st.totalBytes += fileBytes;
+          st.fileCount += 1;
+          st.breakdown.filesBytes += fileBytes;
+        }
       }
 
       // Image attachment
       if (msg.imageUrl) {
-        const imageBytes = estimateDataUrlDecodedBytes(msg.imageUrl);
+        const decodedImageBytes = estimateDataUrlDecodedBytes(msg.imageUrl);
+        const imageBytes =
+          decodedImageBytes > 0
+            ? decodedImageBytes
+            : !hasExplicitDocument && !msg.audioUrl
+              ? explicitFileSize
+              : 0;
         if (imageBytes > 0) {
           categoryTotals.images.bytes += imageBytes;
           categoryTotals.images.count += 1;
@@ -322,7 +348,13 @@ export function calculateStorageAnalytics(input: StorageAnalyticsInput): Storage
 
       // Audio / Voice attachment
       if (msg.audioUrl) {
-        const audioBytes = estimateDataUrlDecodedBytes(msg.audioUrl);
+        const decodedAudioBytes = estimateDataUrlDecodedBytes(msg.audioUrl);
+        const audioBytes =
+          decodedAudioBytes > 0
+            ? decodedAudioBytes
+            : !hasExplicitDocument
+              ? explicitFileSize
+              : 0;
         if (audioBytes > 0) {
           categoryTotals.audio.bytes += audioBytes;
           categoryTotals.audio.count += 1;

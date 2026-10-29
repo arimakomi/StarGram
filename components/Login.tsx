@@ -1,13 +1,20 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Send, User as UserIcon, Lock, ArrowLeft, Loader2, Phone, 
-  Smartphone, CheckCircle, RefreshCw, Sparkles, AlertCircle
+  Smartphone, CheckCircle, RefreshCw, Sparkles, AlertCircle, Copy, Check
 } from 'lucide-react';
 import { authApi } from '../services/auth';
 import { User, DEFAULT_AVATAR, SystemConfig } from '../types';
 import { generateLocalAvatarSvg } from '../services/avatarGenerator';
 import { StarChatLogo } from './StarChatLogo';
-import { cleanIranPhone, isValidIranPhone, sanitizeOtpCode, isValidOtpCode } from '../services/otpUtils';
+import {
+  cleanIranPhone,
+  isValidIranPhone,
+  sanitizeOtpCode,
+  isValidOtpCode,
+  formatOtpFullError,
+  FormattedOtpError
+} from '../services/otpUtils';
 
 interface LoginProps {
   onLogin: (userData: User) => void | Promise<void>;
@@ -42,8 +49,10 @@ export const Login: React.FC<LoginProps> = ({ onLogin, systemConfig }) => {
   const [timerSeconds, setTimerSeconds] = useState(0);
   const expectedOtpLength = systemConfig?.otpCodeLength === 5 ? 5 : 6;
 
-  // General State
+  // General & Full Error Diagnostic State
   const [error, setError] = useState('');
+  const [fullOtpError, setFullOtpError] = useState<FormattedOtpError | null>(null);
+  const [copiedError, setCopiedError] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
@@ -64,6 +73,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin, systemConfig }) => {
 
     setIsLoading(true);
     setError('');
+    setFullOtpError(null);
     try {
       const exists = await authApi.exists(cleanUser);
       setCredStep(exists ? 'password' : 'register');
@@ -78,6 +88,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin, systemConfig }) => {
   const handleCredentialsAuth = async (action: 'login' | 'register') => {
     setIsLoading(true);
     setError('');
+    setFullOtpError(null);
     const cleanUser = username.trim().toLowerCase();
 
     try {
@@ -107,18 +118,22 @@ export const Login: React.FC<LoginProps> = ({ onLogin, systemConfig }) => {
     if (e) e.preventDefault();
     const normalized = cleanIranPhone(phone);
     if (!isValidIranPhone(normalized)) {
+      setFullOtpError(null);
       return setError('شماره همراه نامعتبر است (مثال: 09123456789)');
     }
 
     setIsLoading(true);
     setError('');
+    setFullOtpError(null);
     setSuccessMsg('');
     setSimulatedCode(null);
 
     try {
       const res = await authApi.sendOtp(normalized, 'login');
       if (!res.success) {
-        setError(res.message || 'خطا در ارسال کد تایید');
+        const formatted = formatOtpFullError(res);
+        setError(formatted.summary);
+        setFullOtpError(formatted);
         return;
       }
 
@@ -131,10 +146,16 @@ export const Login: React.FC<LoginProps> = ({ onLogin, systemConfig }) => {
       } else {
         setOtpCode('');
       }
+      if (res.gatewayFailed && (res.errorDetails || res.gatewayError)) {
+        const formatted = formatOtpFullError(res);
+        setFullOtpError(formatted);
+      }
       setSuccessMsg(res.message || 'کد تایید با موفقیت ارسال شد.');
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      setError('خطا در ارتباط با سرور.');
+      const formatted = formatOtpFullError(err);
+      setError(formatted.summary || 'خطا در ارتباط با سرور.');
+      setFullOtpError(formatted);
     } finally {
       setIsLoading(false);
     }
@@ -145,12 +166,14 @@ export const Login: React.FC<LoginProps> = ({ onLogin, systemConfig }) => {
     const normalized = cleanIranPhone(phone);
     const cleanCode = sanitizeOtpCode(otpCode, expectedOtpLength);
 
-    if (!isValidOtpCode(cleanCode)) {
+    if (otpStep !== 'complete_profile' && !isValidOtpCode(cleanCode)) {
+      setFullOtpError(null);
       return setError(`کد تایید ${expectedOtpLength} رقمی را به طور کامل وارد کنید`);
     }
 
     setIsLoading(true);
     setError('');
+    setFullOtpError(null);
 
     try {
       const payload: any = {
@@ -172,7 +195,9 @@ export const Login: React.FC<LoginProps> = ({ onLogin, systemConfig }) => {
       const res = await authApi.verifyOtp(payload);
 
       if (!res.success) {
-        setError(res.message || 'کد تایید اشتباه است.');
+        const formatted = formatOtpFullError(res);
+        setError(formatted.summary || 'کد تایید اشتباه است.');
+        setFullOtpError(formatted);
         return;
       }
 
@@ -190,9 +215,11 @@ export const Login: React.FC<LoginProps> = ({ onLogin, systemConfig }) => {
       };
       localStorage.setItem('starly_session_cloud', JSON.stringify(user));
       await onLogin(user);
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      setError('خطای سیستمی رخ داد.');
+      const formatted = formatOtpFullError(err);
+      setError(formatted.summary || 'خطای سیستمی رخ داد.');
+      setFullOtpError(formatted);
     } finally {
       setIsLoading(false);
     }
@@ -200,8 +227,16 @@ export const Login: React.FC<LoginProps> = ({ onLogin, systemConfig }) => {
 
   const resetAll = () => {
     setError('');
+    setFullOtpError(null);
     setSuccessMsg('');
     setSimulatedCode(null);
+  };
+
+  const handleCopyFullError = () => {
+    if (!fullOtpError) return;
+    navigator.clipboard?.writeText(fullOtpError.technicalReport).catch(() => {});
+    setCopiedError(true);
+    setTimeout(() => setCopiedError(false), 2000);
   };
 
   return (
@@ -379,6 +414,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin, systemConfig }) => {
                     <div className="relative">
                       <Phone className="absolute left-3.5 top-3.5 text-[#708499]" size={18} />
                       <input 
+                        data-testid="login-phone-input"
                         type="tel"
                         value={phone}
                         onChange={e => setPhone(e.target.value)}
@@ -395,6 +431,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin, systemConfig }) => {
                   </p>
 
                   <button 
+                    data-testid="login-send-otp-btn"
                     type="submit" 
                     disabled={isLoading} 
                     className="w-full py-3.5 bg-[#3390ec] rounded-xl font-bold hover:bg-[#2881d9] active:scale-95 transition-all shadow-lg shadow-[#3390ec]/20 flex items-center justify-center gap-2 text-sm disabled:opacity-50"
@@ -539,10 +576,60 @@ export const Login: React.FC<LoginProps> = ({ onLogin, systemConfig }) => {
             </p>
           )}
           {error && (
-            <p className="mt-4 text-red-400 text-xs text-center font-medium bg-red-400/10 p-2.5 rounded-xl border border-red-400/20 animate-in flex items-center justify-center gap-1.5">
-              <AlertCircle size={14} className="shrink-0" />
-              <span>{error}</span>
-            </p>
+            <div
+              data-testid="login-error-alert"
+              className="mt-4 text-red-400 text-xs font-medium bg-red-400/10 p-3 rounded-xl border border-red-400/25 animate-in space-y-2"
+            >
+              <div className="flex items-start gap-2">
+                <AlertCircle size={15} className="shrink-0 mt-0.5 text-red-400" />
+                <span className="leading-relaxed break-words">{error}</span>
+              </div>
+            </div>
+          )}
+
+          {/* Complete Diagnostic Error Details Box */}
+          {fullOtpError && fullOtpError.hasTechnicalDetails && (
+            <div
+              data-testid="otp-full-error-box"
+              className="mt-3 bg-[#0e1621] border border-rose-500/35 rounded-2xl p-3 text-[11px] text-rose-200 space-y-2 animate-in"
+            >
+              <div className="flex items-center justify-between gap-2 border-b border-white/10 pb-1.5">
+                <span className="font-bold text-rose-300 flex items-center gap-1.5">
+                  <AlertCircle size={13} className="text-rose-400 shrink-0" />
+                  <span>گزارش کامل خطای ارسال پیامک</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={handleCopyFullError}
+                  className="px-2 py-0.5 rounded-lg bg-white/5 hover:bg-white/10 text-gray-300 text-[10px] flex items-center gap-1 transition-colors"
+                >
+                  {copiedError ? <Check size={11} className="text-emerald-400" /> : <Copy size={11} />}
+                  <span>{copiedError ? 'کپی شد' : 'کپی خطا'}</span>
+                </button>
+              </div>
+
+              {fullOtpError.statusLine && (
+                <div className="font-mono text-[10px] text-amber-300 bg-amber-500/10 px-2 py-1 rounded-lg break-all" dir="ltr">
+                  {fullOtpError.statusLine}
+                </div>
+              )}
+
+              {fullOtpError.validationLines.length > 0 && (
+                <ul className="list-disc list-inside space-y-0.5 text-rose-200 text-[11px]">
+                  {fullOtpError.validationLines.map((line, i) => (
+                    <li key={i} className="break-words">{line}</li>
+                  ))}
+                </ul>
+              )}
+
+              <pre
+                data-testid="otp-full-error-pre"
+                className="text-[10px] font-mono text-gray-300 bg-black/40 p-2.5 rounded-xl overflow-x-auto max-h-44 whitespace-pre-wrap break-all leading-relaxed"
+                dir="ltr"
+              >
+                {fullOtpError.technicalReport}
+              </pre>
+            </div>
           )}
 
         </div>

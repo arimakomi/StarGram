@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   normalizeMaxUploadMb,
+  getUploadSliderPercentage,
   formatFileSize,
   estimateDataUrlDecodedBytes,
   validateFileSize,
@@ -13,6 +14,13 @@ test('normalizeMaxUploadMb clamps and defaults properly', () => {
   assert.equal(normalizeMaxUploadMb(0), 50);
   assert.equal(normalizeMaxUploadMb(25), 25);
   assert.equal(normalizeMaxUploadMb(900), 500);
+});
+
+test('getUploadSliderPercentage computes exact LTR percentage across 1..500 MB', () => {
+  assert.equal(getUploadSliderPercentage(1), 0);
+  assert.equal(getUploadSliderPercentage(500), 100);
+  const pct50 = getUploadSliderPercentage(50);
+  assert.ok(pct50 > 9.5 && pct50 < 10);
 });
 
 test('calculateStorageAnalytics returns empty stats when no uploads exist', () => {
@@ -35,7 +43,7 @@ test('calculateStorageAnalytics returns empty stats when no uploads exist', () =
   }
 });
 
-test('calculateStorageAnalytics aggregates categories and ranks top 5 users accurately', () => {
+test('calculateStorageAnalytics aggregates categories and ranks top 5 users accurately without double counting voice/image fileSize', () => {
   // Create base64 payloads of known decoded sizes
   const makeBase64 = (byteLen: number) => {
     const buf = Buffer.alloc(byteLen, 65);
@@ -57,8 +65,8 @@ test('calculateStorageAnalytics aggregates categories and ranks top 5 users accu
       type: 'group',
       messages: [
         { id: 'm1', senderId: 'u2', fileSize: 50000, fileName: 'report.pdf' }, // 50,000 B file
-        { id: 'm2', senderId: 'u3', imageUrl: makeBase64(30000) }, // 30,000 B image
-        { id: 'm3', senderId: 'u4', audioUrl: makeBase64(20000) }, // 20,000 B audio
+        { id: 'm2', senderId: 'u3', imageUrl: makeBase64(30000), fileSize: 30000 }, // 30,000 B image (has fileSize too, must NOT double count in files)
+        { id: 'm3', senderId: 'u4', audioUrl: makeBase64(20000), fileSize: 20000 }, // 20,000 B audio (has fileSize too, must NOT double count in files)
         { id: 'm4', senderId: 'u5', fileSize: 10000, fileName: 'notes.txt' }, // 10,000 B file
         { id: 'm5', senderId: 'u6', fileSize: 500, fileName: 'tiny.txt' } // 500 B file
       ]
@@ -88,9 +96,15 @@ test('calculateStorageAnalytics aggregates categories and ranks top 5 users accu
 
   // Category checks
   const filesCat = result.categories.find((c) => c.key === 'files')!;
+  const imagesCat = result.categories.find((c) => c.key === 'images')!;
+  const audioCat = result.categories.find((c) => c.key === 'audio')!;
   const storiesCat = result.categories.find((c) => c.key === 'stories')!;
   assert.equal(filesCat.bytes, 60500);
   assert.equal(filesCat.fileCount, 3);
+  assert.equal(imagesCat.bytes, 30000);
+  assert.equal(imagesCat.fileCount, 1);
+  assert.equal(audioCat.bytes, 20000);
+  assert.equal(audioCat.fileCount, 1);
   assert.equal(filesCat.barHeightPercent, 100); // Highest category
   assert.equal(storiesCat.bytes, 40000);
   assert.equal(storiesCat.fileCount, 1);
@@ -103,3 +117,4 @@ test('validateFileSize enforces maxUploadSizeMb', () => {
   assert.equal(bad.valid, false);
   assert.ok(bad.message?.includes('50'));
 });
+

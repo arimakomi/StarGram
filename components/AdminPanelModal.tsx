@@ -15,7 +15,21 @@ import {
   getAllDatabaseCollectionsData, restoreAllDatabaseCollectionsData, getRawCollectionStore, clearAllDatabaseData
 } from '../services/database';
 import { StarChatLogo, STARCHAT_LOGO_URL, STARCHAT_MINIMAL_LOGO_URL } from './StarChatLogo';
-import { normalizeMaxUploadMb, calculateStorageAnalytics, formatFileSize } from '../services/fileUploadUtils';
+import {
+  normalizeMaxUploadMb,
+  getUploadSliderPercentage,
+  UPLOAD_SLIDER_MIN_MB,
+  UPLOAD_SLIDER_MAX_MB,
+  UPLOAD_SLIDER_TICKS_MB,
+  calculateStorageAnalytics,
+  formatFileSize
+} from '../services/fileUploadUtils';
+import {
+  cleanSmsApiKey,
+  cleanSmsConfigField,
+  formatOtpFullError,
+  FormattedOtpError
+} from '../services/otpUtils';
 import { generateLocalAvatarSvg } from '../services/avatarGenerator';
 
 interface AdminPanelModalProps {
@@ -110,15 +124,18 @@ const handleExecutePanic = async () => {
 
   // Max Upload Size Configuration State (in MB)
   const [maxUploadSizeMb, setMaxUploadSizeMb] = useState<number>(() => normalizeMaxUploadMb(systemConfig.maxUploadSizeMb, 50));
+  const [maxUploadInputStr, setMaxUploadInputStr] = useState<string>(() => String(normalizeMaxUploadMb(systemConfig.maxUploadSizeMb, 50)));
   const [isSavingMaxUploadSize, setIsSavingMaxUploadSize] = useState(false);
   const [maxUploadSaveSuccess, setMaxUploadSaveSuccess] = useState(false);
   const [maxUploadSaveError, setMaxUploadSaveError] = useState('');
 
   useEffect(() => {
     if (systemConfig.maxUploadSizeMb !== undefined) {
-      setMaxUploadSizeMb(normalizeMaxUploadMb(systemConfig.maxUploadSizeMb, 50));
+      const norm = normalizeMaxUploadMb(systemConfig.maxUploadSizeMb, 50);
+      setMaxUploadSizeMb(norm);
+      setMaxUploadInputStr(String(norm));
     }
-    setCfg(systemConfig);
+    setCfg(prev => ({ ...prev, ...systemConfig }));
   }, [systemConfig]);
 
   // Storage Analytics State (Total storage bar chart & Top 5 storage-consuming users)
@@ -207,7 +224,49 @@ const handleExecutePanic = async () => {
   // Test SMS State
   const [smsTestPhone, setSmsTestPhone] = useState('');
   const [isTestingSms, setIsTestingSms] = useState(false);
-  const [smsTestResult, setSmsTestResult] = useState<{ success: boolean; simulated?: boolean; message: string; code?: string; error?: string } | null>(null);
+  const [smsTestResult, setSmsTestResult] = useState<{
+    success: boolean;
+    simulated?: boolean;
+    gatewayFailed?: boolean;
+    message: string;
+    code?: string;
+    error?: string;
+    fullError?: FormattedOtpError | null;
+  } | null>(null);
+  const [copiedSmsError, setCopiedSmsError] = useState(false);
+
+  // Hydrate full admin configuration (including secret smsApiKey, smsPatternCode, maxUploadSizeMb) from server on mount
+  useEffect(() => {
+    const token = getToken();
+    if (!token) return;
+    fetch('/api/v1/admin/config', {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+      .then(res => (res.ok ? res.json() : null))
+      .then(data => {
+        const srvCfg = data?.config;
+        if (!srvCfg || typeof srvCfg !== 'object') return;
+        setCfg(prev => ({ ...prev, ...srvCfg }));
+        if (srvCfg.maxUploadSizeMb !== undefined) {
+          const norm = normalizeMaxUploadMb(srvCfg.maxUploadSizeMb, 50);
+          setMaxUploadSizeMb(norm);
+          setMaxUploadInputStr(String(norm));
+        }
+        if (srvCfg.smsOtpEnabled !== undefined) setSmsOtpEnabled(srvCfg.smsOtpEnabled !== false);
+        if (srvCfg.smsFallbackEnabled !== undefined) setSmsFallbackEnabled(srvCfg.smsFallbackEnabled !== false);
+        if (typeof srvCfg.smsApiKey === 'string') setSmsApiKey(srvCfg.smsApiKey);
+        if (typeof srvCfg.smsLineNumber === 'string') setSmsLineNumber(srvCfg.smsLineNumber);
+        if (srvCfg.smsSendMode === 'standard' || srvCfg.smsSendMode === 'pattern') setSmsSendMode(srvCfg.smsSendMode);
+        if (typeof srvCfg.smsPatternCode === 'string') setSmsPatternCode(srvCfg.smsPatternCode);
+        if (typeof srvCfg.smsPatternVarName === 'string' && srvCfg.smsPatternVarName) setSmsPatternVarName(srvCfg.smsPatternVarName);
+        if (srvCfg.otpExpiresInMinutes) setOtpExpiresInMinutes(Number(srvCfg.otpExpiresInMinutes) || 2);
+        if (srvCfg.otpCodeLength) setOtpCodeLength(Number(srvCfg.otpCodeLength) === 5 ? 5 : 6);
+        if (srvCfg.requireVerifiedPhoneForMessaging !== undefined) {
+          setRequireVerifiedPhoneForMessaging(Boolean(srvCfg.requireVerifiedPhoneForMessaging));
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   // API Tokens State
   const [apiTokens, setApiTokens] = useState<ApiToken[]>([]);
@@ -370,9 +429,11 @@ const handleExecutePanic = async () => {
     setIsSavingMaxUploadSize(true);
     setMaxUploadSaveError('');
     try {
-      const targetVal = overrideMb !== undefined ? overrideMb : maxUploadSizeMb;
+      const parsedFromInput = maxUploadInputStr.trim() !== '' ? Number(maxUploadInputStr) : maxUploadSizeMb;
+      const targetVal = overrideMb !== undefined ? overrideMb : parsedFromInput;
       const val = normalizeMaxUploadMb(targetVal, 50);
       setMaxUploadSizeMb(val);
+      setMaxUploadInputStr(String(val));
       const updatedConfig: Partial<SystemConfig> = { maxUploadSizeMb: val };
       await onUpdateSystemConfig(updatedConfig);
       setCfg(prev => ({ ...prev, ...updatedConfig }));
@@ -443,14 +504,21 @@ const handleExecutePanic = async () => {
     setIsSavingSms(true);
     setSmsSaveSuccess(false);
     try {
+      const cleanedApiKey = cleanSmsApiKey(smsApiKey);
+      const cleanedLine = cleanSmsConfigField(smsLineNumber);
+      const cleanedPattern = cleanSmsConfigField(smsPatternCode);
+      setSmsApiKey(cleanedApiKey);
+      setSmsLineNumber(cleanedLine);
+      setSmsPatternCode(cleanedPattern);
+
       const updatedSmsConfig: Partial<SystemConfig> = {
         smsProvider: 'iranpayamak',
         smsOtpEnabled,
         smsFallbackEnabled,
-        smsApiKey: smsApiKey.trim(),
-        smsLineNumber: smsLineNumber.trim(),
+        smsApiKey: cleanedApiKey,
+        smsLineNumber: cleanedLine,
         smsSendMode,
-        smsPatternCode: smsPatternCode.trim(),
+        smsPatternCode: cleanedPattern,
         smsPatternVarName: smsPatternVarName.trim() || 'code',
         otpExpiresInMinutes: Number(otpExpiresInMinutes) || 2,
         otpCodeLength: Number(otpCodeLength) === 5 ? 5 : 6,
@@ -505,6 +573,10 @@ const handleExecutePanic = async () => {
     }
     setIsTestingSms(true);
     setSmsTestResult(null);
+    const cleanedApiKey = cleanSmsApiKey(smsApiKey);
+    const cleanedLine = cleanSmsConfigField(smsLineNumber);
+    const cleanedPattern = cleanSmsConfigField(smsPatternCode);
+
     try {
       const token = getToken();
       const res = await fetch('/api/v1/admin/sms/test', {
@@ -515,34 +587,58 @@ const handleExecutePanic = async () => {
         },
         body: JSON.stringify({
           phone: smsTestPhone.trim(),
-          smsApiKey: smsApiKey.trim(),
-          smsLineNumber: smsLineNumber.trim(),
+          smsApiKey: cleanedApiKey,
+          smsLineNumber: cleanedLine,
           smsSendMode,
-          smsPatternCode: smsPatternCode.trim(),
+          smsPatternCode: cleanedPattern,
           smsPatternVarName: smsPatternVarName.trim() || 'code',
           smsFallbackEnabled,
           otpCodeLength: Number(otpCodeLength) === 5 ? 5 : 6
         })
       });
-      const data = await res.json();
+      const rawText = await res.text().catch(() => '');
+      let data: any = {};
+      if (rawText) {
+        try {
+          data = JSON.parse(rawText);
+        } catch {
+          data = { message: `پاسخ غیر JSON از سرور (HTTP ${res.status})`, rawBody: rawText };
+        }
+      }
+
+      const hasGatewayError = Boolean(!res.ok || !data.success || data.gatewayFailed || data.error || data.errorDetails);
+      const formattedErr = hasGatewayError ? formatOtpFullError({ status: res.status, statusText: res.statusText, ...data }) : null;
+
       if (res.ok && data.success) {
         setSmsTestResult({
-          success: true,
+          success: !data.gatewayFailed,
           simulated: data.simulated,
+          gatewayFailed: Boolean(data.gatewayFailed),
           code: data.code,
-          message: data.message || 'پیامک تست با موفقیت ارسال شد.'
+          error: data.error || data.gatewayError,
+          message: data.gatewayFailed
+            ? formattedErr?.summary || data.message || 'ارسال پیامک از طریق درگاه با خطا مواجه شد (کد شبیه‌ساز تولید شد).'
+            : data.message || 'پیامک تست با موفقیت ارسال شد.',
+          fullError: formattedErr
         });
       } else {
         setSmsTestResult({
           success: false,
           simulated: data.simulated,
-          message: data.message || data.error || 'خطا در ارسال پیامک تست.'
+          gatewayFailed: true,
+          code: data.code,
+          error: data.error || data.message,
+          message: formattedErr?.summary || data.message || data.error || 'خطا در ارسال پیامک تست.',
+          fullError: formattedErr
         });
       }
     } catch (err: any) {
+      const formattedErr = formatOtpFullError(err);
       setSmsTestResult({
         success: false,
-        message: err.message || 'خطای شبکه در ارسال پیامک تست.'
+        gatewayFailed: true,
+        message: formattedErr.summary || err.message || 'خطای شبکه در ارسال پیامک تست.',
+        fullError: formattedErr
       });
     } finally {
       setIsTestingSms(false);
@@ -1237,47 +1333,112 @@ const handleExecutePanic = async () => {
                     </p>
                   </div>
 
-                  <div className="flex items-center gap-2 shrink-0">
-                    <input
-                      id="admin-max-upload-input"
-                      data-testid="admin-max-upload-input"
-                      type="number"
-                      min={1}
-                      max={500}
-                      value={maxUploadSizeMb}
-                      onChange={(e) => setMaxUploadSizeMb(Math.max(1, Math.min(500, parseInt(e.target.value, 10) || 1)))}
-                      className="w-24 bg-[#0e1621] border border-[#242f3d] rounded-xl px-3 py-2 text-xs font-mono font-bold text-center text-white focus:outline-hidden focus:border-[#5288c1] tabular-nums"
+                  <div className="flex flex-col items-end gap-1 shrink-0">
+                    <div className="flex items-center gap-2">
+                      <input
+                        id="admin-max-upload-input"
+                        data-testid="admin-max-upload-input"
+                        type="number"
+                        min={UPLOAD_SLIDER_MIN_MB}
+                        max={UPLOAD_SLIDER_MAX_MB}
+                        value={maxUploadInputStr}
+                        onChange={(e) => {
+                          const raw = e.target.value;
+                          setMaxUploadInputStr(raw);
+                          const parsed = Number(raw);
+                          if (raw.trim() !== '' && Number.isFinite(parsed) && parsed >= UPLOAD_SLIDER_MIN_MB) {
+                            setMaxUploadSizeMb(normalizeMaxUploadMb(parsed, maxUploadSizeMb));
+                          }
+                        }}
+                        onBlur={() => {
+                          const clamped = normalizeMaxUploadMb(maxUploadInputStr, maxUploadSizeMb);
+                          setMaxUploadSizeMb(clamped);
+                          setMaxUploadInputStr(String(clamped));
+                        }}
+                        className="w-24 bg-[#0e1621] border border-[#242f3d] rounded-xl px-3 py-2 text-xs font-mono font-bold text-center text-white focus:outline-hidden focus:border-[#5288c1] tabular-nums"
+                        dir="ltr"
+                      />
+                      <span className="text-xs font-bold text-gray-300">مگابایت (MB)</span>
+                    </div>
+                    <span
+                      data-testid="admin-max-upload-exact-units"
+                      className="text-[10px] font-mono text-sky-300/90 tabular-nums"
                       dir="ltr"
-                    />
-                    <span className="text-xs font-bold text-gray-300">مگابایت (MB)</span>
+                    >
+                      {maxUploadSizeMb} MB = {(maxUploadSizeMb * 1024).toLocaleString('en-US')} KB ({(maxUploadSizeMb * 1024 * 1024).toLocaleString('en-US')} B)
+                    </span>
                   </div>
                 </div>
 
-                {/* Interactive Range Slider */}
-                <div className="space-y-1.5">
-                  <input
-                    data-testid="admin-max-upload-slider"
-                    type="range"
-                    min={1}
-                    max={200}
-                    step={1}
-                    value={Math.min(200, maxUploadSizeMb)}
-                    onChange={(e) => setMaxUploadSizeMb(Number(e.target.value))}
-                    className="w-full accent-[#5288c1] cursor-pointer h-1.5 bg-[#0e1621] rounded-lg"
-                  />
-                  <div className="flex justify-between text-[10px] text-gray-500 font-mono tabular-nums" dir="ltr">
-                    <span>1 MB</span>
-                    <span>50 MB</span>
-                    <span>100 MB</span>
-                    <span>150 MB</span>
-                    <span>200 MB</span>
+                {/* Synchronized LTR Interactive Range Slider & Visual Bar (1 MB to 500 MB) */}
+                <div className="space-y-2 pt-1" dir="ltr">
+                  <div className="flex items-center justify-between text-[11px] font-mono text-gray-300 tabular-nums">
+                    <span>Min: {UPLOAD_SLIDER_MIN_MB} MB</span>
+                    <span
+                      data-testid="admin-max-upload-bar-label"
+                      className="px-2.5 py-0.5 rounded-lg bg-[#5288c1]/20 border border-[#5288c1]/40 text-sky-300 font-bold"
+                    >
+                      {maxUploadSizeMb} MB / {UPLOAD_SLIDER_MAX_MB} MB ({Math.round((maxUploadSizeMb / UPLOAD_SLIDER_MAX_MB) * 100)}%)
+                    </span>
+                    <span>Max: {UPLOAD_SLIDER_MAX_MB} MB</span>
+                  </div>
+
+                  {/* Visual Progress Bar + Native Range Input in strict LTR */}
+                  <div className="relative flex items-center h-6">
+                    <div className="w-full h-2.5 bg-[#0e1621] rounded-full overflow-hidden border border-[#242f3d] pointer-events-none">
+                      <div
+                        data-testid="admin-max-upload-bar-fill"
+                        className="h-full bg-gradient-to-r from-[#5288c1] to-sky-400 rounded-full transition-all duration-150"
+                        style={{ width: `${getUploadSliderPercentage(maxUploadSizeMb)}%` }}
+                      />
+                    </div>
+                    <input
+                      data-testid="admin-max-upload-slider"
+                      type="range"
+                      dir="ltr"
+                      min={UPLOAD_SLIDER_MIN_MB}
+                      max={UPLOAD_SLIDER_MAX_MB}
+                      step={1}
+                      value={maxUploadSizeMb}
+                      onChange={(e) => {
+                        const val = normalizeMaxUploadMb(Number(e.target.value), 50);
+                        setMaxUploadSizeMb(val);
+                        setMaxUploadInputStr(String(val));
+                      }}
+                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                    />
+                    <div
+                      className="w-4 h-4 rounded-full bg-white border-2 border-[#5288c1] shadow-md pointer-events-none absolute -ml-2 transition-all duration-150"
+                      style={{ left: `${getUploadSliderPercentage(maxUploadSizeMb)}%` }}
+                    />
+                  </div>
+
+                  {/* Clickable Scale Ticks in strict LTR */}
+                  <div className="flex justify-between text-[10px] text-gray-400 font-mono tabular-nums pt-0.5" dir="ltr">
+                    {UPLOAD_SLIDER_TICKS_MB.map((tickMb) => (
+                      <button
+                        key={tickMb}
+                        type="button"
+                        onClick={() => {
+                          setMaxUploadSizeMb(tickMb);
+                          setMaxUploadInputStr(String(tickMb));
+                        }}
+                        className={`px-1 py-0.5 rounded transition-colors ${
+                          maxUploadSizeMb === tickMb
+                            ? 'text-sky-300 font-bold bg-sky-500/15'
+                            : 'hover:text-white'
+                        }`}
+                      >
+                        {tickMb} MB
+                      </button>
+                    ))}
                   </div>
                 </div>
 
                 {/* Preset Quick-Select Buttons */}
                 <div className="flex flex-wrap items-center gap-2 pt-1">
                   <span className="text-[11px] text-gray-400 ml-1">مقادیر پیشنهادی:</span>
-                  {[1, 5, 15, 25, 50, 100, 200].map((presetMb) => (
+                  {[1, 5, 15, 25, 50, 100, 200, 500].map((presetMb) => (
                     <button
                       key={presetMb}
                       type="button"
@@ -1571,16 +1732,17 @@ const handleExecutePanic = async () => {
                                 {u.formattedSize}
                               </span>
                               <span className="block text-[10px] text-gray-400 tabular-nums">
-                                <span className="font-mono" dir="ltr">{u.percentageOfTotal}%</span> کل فضا
+                                سهم از کل فضا: <span className="font-mono text-gray-200 font-bold" dir="ltr">{u.percentageOfTotal}%</span>
                               </span>
                             </div>
                           </div>
 
-                          {/* User Consumption Progress Bar */}
-                          <div className="w-full h-1.5 bg-[#17212b] rounded-full overflow-hidden">
+                          {/* User Consumption Progress Bar (matches percentageOfTotal accurately in LTR) */}
+                          <div className="w-full h-2 bg-[#17212b] rounded-full overflow-hidden border border-white/5" dir="ltr">
                             <div
+                              data-testid={`admin-top-user-bar-${idx}`}
                               className="h-full bg-[#5288c1] bg-gradient-to-r from-[#5288c1] to-emerald-400 rounded-full transition-all duration-300"
-                              style={{ width: `${relativeWidth}%` }}
+                              style={{ width: `${Math.max(4, Math.min(100, u.percentageOfTotal))}%` }}
                             />
                           </div>
                         </div>
@@ -2088,6 +2250,7 @@ const handleExecutePanic = async () => {
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
                 <div className="relative flex-1">
                   <input
+                    data-testid="admin-sms-test-phone-input"
                     type="text"
                     value={smsTestPhone}
                     onChange={(e) => setSmsTestPhone(e.target.value)}
@@ -2099,6 +2262,7 @@ const handleExecutePanic = async () => {
                 </div>
 
                 <button
+                  data-testid="admin-sms-test-send-btn"
                   type="button"
                   onClick={handleTestSms}
                   disabled={isTestingSms || !smsTestPhone.trim()}
@@ -2111,23 +2275,78 @@ const handleExecutePanic = async () => {
 
               {smsTestResult && (
                 <div
-                  className={`p-3.5 rounded-xl text-xs border flex flex-col gap-1.5 animate-in fade-in duration-200 ${
-                    smsTestResult.success
+                  data-testid="admin-sms-test-result"
+                  className={`p-4 rounded-xl text-xs border flex flex-col gap-2.5 animate-in fade-in duration-200 ${
+                    smsTestResult.success && !smsTestResult.gatewayFailed
                       ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300'
-                      : 'bg-rose-500/15 border-rose-500/30 text-rose-300'
+                      : 'bg-rose-500/15 border-rose-500/35 text-rose-200'
                   }`}
                 >
-                  <div className="flex items-center gap-2 font-bold">
-                    {smsTestResult.success ? (
-                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <div className="flex items-start gap-2 font-bold">
+                    {smsTestResult.success && !smsTestResult.gatewayFailed ? (
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
                     ) : (
-                      <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+                      <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
                     )}
-                    <span>{smsTestResult.message}</span>
+                    <span className="leading-relaxed break-words">{smsTestResult.message}</span>
                   </div>
+
                   {smsTestResult.code && (
-                    <div className="text-[11px] text-gray-300 font-mono bg-black/30 p-2 rounded-lg mt-1" dir="ltr">
-                      کد تایید ارسال شده: {smsTestResult.code} {smsTestResult.simulated && '(حالت شبیه‌سازی fallback)'}
+                    <div className="text-[11px] text-gray-200 font-mono bg-black/35 p-2.5 rounded-lg border border-white/10" dir="ltr">
+                      Generated Test OTP Code: <span className="font-bold text-white">{smsTestResult.code}</span>{' '}
+                      {smsTestResult.simulated && '(Simulated Fallback Mode)'}
+                    </div>
+                  )}
+
+                  {smsTestResult.fullError && smsTestResult.fullError.hasTechnicalDetails && (
+                    <div
+                      data-testid="admin-sms-error-details"
+                      className="bg-[#0e1621] border border-rose-500/40 rounded-xl p-3 space-y-2 text-[11px] text-rose-200"
+                    >
+                      <div className="flex items-center justify-between gap-2 border-b border-white/10 pb-1.5">
+                        <span className="font-bold text-rose-300 flex items-center gap-1.5">
+                          <Code2 className="w-3.5 h-3.5 text-rose-400" />
+                          <span>گزارش کامل فنی و پاسخ خام وب‌سرویس ایران پیامک (Full Error Report)</span>
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!smsTestResult.fullError) return;
+                            navigator.clipboard?.writeText(smsTestResult.fullError.technicalReport).catch(() => {});
+                            setCopiedSmsError(true);
+                            setTimeout(() => setCopiedSmsError(false), 2000);
+                          }}
+                          className="px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-gray-200 text-[10px] flex items-center gap-1 transition-colors"
+                        >
+                          {copiedSmsError ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                          <span>{copiedSmsError ? 'کپی شد' : 'کپی گزارش کامل خطا'}</span>
+                        </button>
+                      </div>
+
+                      {smsTestResult.fullError.statusLine && (
+                        <div className="font-mono text-[10px] text-amber-300 bg-amber-500/10 px-2.5 py-1 rounded-lg break-all" dir="ltr">
+                          {smsTestResult.fullError.statusLine}
+                        </div>
+                      )}
+
+                      {smsTestResult.fullError.validationLines.length > 0 && (
+                        <div className="space-y-1">
+                          <span className="text-[10px] font-bold text-rose-300 block">خطاهای اعتبارسنجی پارامترها:</span>
+                          <ul className="list-disc list-inside space-y-0.5 text-rose-200">
+                            {smsTestResult.fullError.validationLines.map((vLine, idx) => (
+                              <li key={idx} className="break-words">{vLine}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+
+                      <pre
+                        data-testid="admin-sms-error-pre"
+                        className="text-[10px] font-mono text-gray-200 bg-black/50 p-2.5 rounded-lg overflow-x-auto max-h-56 whitespace-pre-wrap break-all leading-relaxed"
+                        dir="ltr"
+                      >
+                        {smsTestResult.fullError.technicalReport}
+                      </pre>
                     </div>
                   )}
                 </div>

@@ -797,82 +797,335 @@ async function findUserByPhone(phone) {
   return null;
 }
 
+function cleanServerApiKey(raw) {
+  if (!raw || typeof raw !== 'string') return '';
+  let val = raw.trim();
+  val = val.replace(/^["']+|["']+$/g, '').trim();
+  val = val.replace(/^(Bearer|Api-Key)\s*:?\s*/i, '').trim();
+  return val;
+}
+
+function maskApiKey(key) {
+  if (!key || typeof key !== 'string') return '(خالی)';
+  if (key.length <= 8) return `${key.slice(0, 2)}***`;
+  return `${key.slice(0, 6)}...${key.slice(-4)} (len=${key.length})`;
+}
+
+function formatValidationErrorsServer(errorsObj) {
+  if (!errorsObj) return '';
+  if (typeof errorsObj === 'string') return errorsObj;
+  if (Array.isArray(errorsObj)) {
+    return errorsObj.map((x) => (typeof x === 'string' ? x : JSON.stringify(x))).join(' | ');
+  }
+  if (typeof errorsObj === 'object') {
+    const parts = [];
+    for (const [field, msgs] of Object.entries(errorsObj)) {
+      if (Array.isArray(msgs)) parts.push(`${field}: ${msgs.join('، ')}`);
+      else if (msgs !== undefined && msgs !== null) parts.push(`${field}: ${typeof msgs === 'string' ? msgs : JSON.stringify(msgs)}`);
+    }
+    return parts.join(' | ');
+  }
+  return '';
+}
+
 async function sendIranPayamakSms({ phone, code, config }) {
-  const apiKey = config?.smsApiKey || process.env.IRANPAYAMAK_API_KEY;
-  const lineNumber = config?.smsLineNumber || process.env.IRANPAYAMAK_LINE_NUMBER;
-  const sendMode = config?.smsSendMode || 'pattern';
-  const patternCode = config?.smsPatternCode || process.env.IRANPAYAMAK_PATTERN_CODE;
-  const varName = config?.smsPatternVarName || 'code';
+  const apiKey = cleanServerApiKey(config?.smsApiKey || process.env.IRANPAYAMAK_API_KEY);
+  const lineNumber = normalizeDigitsServer(String(config?.smsLineNumber || process.env.IRANPAYAMAK_LINE_NUMBER || '')).trim();
+  const sendMode = config?.smsSendMode === 'standard' ? 'standard' : 'pattern';
+  const patternCode = normalizeDigitsServer(String(config?.smsPatternCode || process.env.IRANPAYAMAK_PATTERN_CODE || '')).trim();
+  const varName = String(config?.smsPatternVarName || 'code').trim() || 'code';
   const fallbackEnabled = config?.smsFallbackEnabled !== false; // default true
 
   if (!apiKey) {
+    const missingKeyError = 'کلید وب‌سرویس ایران پیامک (API Key) در پنل مدیریت تنظیم نشده است.';
+    const errorDetails = {
+      httpStatus: 0,
+      statusText: 'MISSING_API_KEY',
+      sendMode,
+      providerMessage: missingKeyError,
+      requestSummary: {
+        phone,
+        sendMode,
+        lineNumber: lineNumber || '(خالی)',
+        patternCode: patternCode || '(خالی)',
+        apiKey: '(تنظیم نشده)'
+      },
+      timestamp: new Date().toISOString()
+    };
     if (!fallbackEnabled) {
-      return { success: false, simulated: false, error: 'اطلاعات درگاه پیامک (توکن API) در سیستم تنظیم نشده است.' };
+      return {
+        success: false,
+        simulated: false,
+        gatewayFailed: true,
+        error: missingKeyError,
+        message: missingKeyError,
+        errorDetails
+      };
     }
     console.log(`[SMS-DEV-SIMULATED] IranPayamak credentials unconfigured. Code for ${phone}: ${code}`);
-    return { success: true, simulated: true, code, message: 'کد تایید شبیه‌سازی شد (تنظیمات پنل پیامک هنوز تکمیل نشده است)' };
+    return {
+      success: true,
+      simulated: true,
+      gatewayFailed: false,
+      code,
+      message: 'کد تایید شبیه‌سازی شد (تنظیمات پنل پیامک هنوز تکمیل نشده است)'
+    };
   }
 
+  let endpoint = '';
+  let payload = {};
+
+  if (sendMode === 'pattern') {
+    endpoint = 'https://api.iranpayamak.com/ws/v1/sms/pattern';
+    if (!patternCode) {
+      const missingPatternMsg = 'کد پترن / الگو (Pattern Code) برای ارسال سریع پترن وارد نشده است. لطفاً کد پترن را در پنل مدیریت وارد کنید یا روش ارسال را روی «ارسال متنی معمولی» قرار دهید.';
+      const errorDetails = {
+        httpStatus: 400,
+        statusText: 'MISSING_PATTERN_CODE',
+        endpoint,
+        method: 'POST',
+        sendMode,
+        providerMessage: missingPatternMsg,
+        validationErrors: { code: ['کد الگو (Pattern Code) الزامی است.'] },
+        requestSummary: {
+          recipient: phone,
+          code: '(خالی)',
+          attributes: { [varName]: String(code) },
+          line_number: lineNumber || '(پیش‌فرض پترن)',
+          apiKey: maskApiKey(apiKey)
+        },
+        timestamp: new Date().toISOString()
+      };
+      if (!fallbackEnabled) {
+        return {
+          success: false,
+          simulated: false,
+          gatewayFailed: true,
+          error: missingPatternMsg,
+          message: missingPatternMsg,
+          errorDetails
+        };
+      }
+      return {
+        success: true,
+        simulated: true,
+        gatewayFailed: true,
+        code,
+        error: missingPatternMsg,
+        gatewayError: missingPatternMsg,
+        errorDetails,
+        message: `${missingPatternMsg} — کد موقت شبیه‌ساز: ${code}`
+      };
+    }
+
+    payload = {
+      code: patternCode,
+      attributes: {
+        [varName]: String(code)
+      },
+      recipient: phone,
+      ...(lineNumber ? { line_number: lineNumber } : {}),
+      number_format: 'english'
+    };
+  } else {
+    endpoint = 'https://api.iranpayamak.com/ws/v1/sms/simple';
+    if (!lineNumber) {
+      const missingLineMsg = 'شماره خط ارسال‌کننده (Line Number) برای ارسال متنی معمولی الزامی است.';
+      const errorDetails = {
+        httpStatus: 400,
+        statusText: 'MISSING_LINE_NUMBER',
+        endpoint,
+        method: 'POST',
+        sendMode,
+        providerMessage: missingLineMsg,
+        validationErrors: { line_number: ['شماره خط ارسال‌کننده در حالت ارسال متنی ساده الزامی است.'] },
+        requestSummary: {
+          recipients: [phone],
+          line_number: '(خالی)',
+          apiKey: maskApiKey(apiKey)
+        },
+        timestamp: new Date().toISOString()
+      };
+      if (!fallbackEnabled) {
+        return {
+          success: false,
+          simulated: false,
+          gatewayFailed: true,
+          error: missingLineMsg,
+          message: missingLineMsg,
+          errorDetails
+        };
+      }
+      return {
+        success: true,
+        simulated: true,
+        gatewayFailed: true,
+        code,
+        error: missingLineMsg,
+        gatewayError: missingLineMsg,
+        errorDetails,
+        message: `${missingLineMsg} — کد موقت شبیه‌ساز: ${code}`
+      };
+    }
+
+    const text = `کد تایید شما در استارچت: ${code}`;
+    payload = {
+      text,
+      line_number: lineNumber,
+      recipients: [phone],
+      number_format: 'english'
+    };
+  }
+
+  const requestSummary = {
+    endpoint,
+    method: 'POST',
+    sendMode,
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      'Api-Key': maskApiKey(apiKey)
+    },
+    body: payload
+  };
+
   try {
-    if (sendMode === 'pattern' && patternCode) {
-      const payload = {
-        code: patternCode,
-        attributes: {
-          [varName]: String(code)
-        },
-        recipient: phone,
-        line_number: lineNumber || undefined
-      };
-      const res = await fetch('https://api.iranpayamak.com/ws/v1/sms/pattern', {
-        method: 'POST',
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json',
-          'Api-Key': apiKey
-        },
-        body: JSON.stringify(payload)
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        console.warn('IranPayamak pattern send error:', res.status, data);
-        if (!fallbackEnabled) {
-          return { success: false, simulated: false, error: data?.message || 'خطا در ارسال پیامک از طریق سامانه ایران پیامک' };
-        }
-        return { success: true, simulated: true, code, error: data?.message || 'خطا در ارتباط با سامانه ایران پیامک', message: `ارسال پیامک با خطا مواجه شد؛ کد موقت جهت تست: ${code}` };
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+        'Api-Key': apiKey
+      },
+      body: JSON.stringify(payload)
+    });
+
+    const rawText = await res.text().catch(() => '');
+    let data = {};
+    if (rawText) {
+      try {
+        data = JSON.parse(rawText);
+      } catch {
+        data = { rawText: rawText.slice(0, 2000) };
       }
-      return { success: true, simulated: false, data, message: 'کد تایید با موفقیت پیامک شد.' };
-    } else {
-      const text = `کد تایید شما در استارچت: ${code}`;
-      const payload = {
-        recipients: [phone],
-        message: text,
-        line_number: lineNumber
-      };
-      const res = await fetch('https://api.iranpayamak.com/ws/v1/sms/send', {
-        method: 'POST',
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json',
-          'Api-Key': apiKey
-        },
-        body: JSON.stringify(payload)
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        console.warn('IranPayamak standard send error:', res.status, data);
-        if (!fallbackEnabled) {
-          return { success: false, simulated: false, error: data?.message || 'خطا در ارسال پیامک از طریق سامانه ایران پیامک' };
-        }
-        return { success: true, simulated: true, code, error: data?.message || 'خطا در ارسال پیامک', message: `ارسال پیامک با خطا مواجه شد؛ کد موقت جهت تست: ${code}` };
-      }
-      return { success: true, simulated: false, data, message: 'کد تایید با موفقیت پیامک شد.' };
     }
+
+    const providerStatusError =
+      data?.status === 'error' ||
+      data?.status === false ||
+      data?.is_success === false ||
+      (typeof data?.status_code === 'number' && data.status_code >= 400);
+
+    if (!res.ok || providerStatusError) {
+      const validationErrors = data?.errors || data?.data?.errors || null;
+      const validationStr = formatValidationErrorsServer(validationErrors);
+      const providerMsg =
+        data?.message ||
+        data?.error ||
+        data?.data?.message ||
+        (typeof data?.rawText === 'string' ? data.rawText.slice(0, 300) : '') ||
+        `خطای وب‌سرویس ایران پیامک (HTTP ${res.status} ${res.statusText || ''})`.trim();
+
+      let fullError = providerMsg;
+      if (validationStr && !fullError.includes(validationStr)) {
+        fullError = `${fullError} — جزئیات فیلدها: ${validationStr}`;
+      }
+      if (res.status && !fullError.includes(String(res.status))) {
+        fullError = `${fullError} (کد وضعیت HTTP ${res.status}${res.statusText ? ` ${res.statusText}` : ''})`;
+      }
+
+      const errorDetails = {
+        httpStatus: res.status,
+        statusText: res.statusText || '',
+        endpoint,
+        method: 'POST',
+        sendMode,
+        providerMessage: providerMsg,
+        validationErrors,
+        requestSummary,
+        rawResponse: Object.keys(data).length > 0 ? data : rawText,
+        timestamp: new Date().toISOString()
+      };
+
+      console.warn('IranPayamak send error:', res.status, fullError, errorDetails);
+      if (!fallbackEnabled) {
+        return {
+          success: false,
+          simulated: false,
+          gatewayFailed: true,
+          error: fullError,
+          message: fullError,
+          errorDetails
+        };
+      }
+      return {
+        success: true,
+        simulated: true,
+        gatewayFailed: true,
+        code,
+        error: fullError,
+        gatewayError: fullError,
+        errorDetails,
+        message: `خطای درگاه پیامک: ${fullError} — کد موقت جهت تست: ${code}`
+      };
+    }
+
+    return {
+      success: true,
+      simulated: false,
+      gatewayFailed: false,
+      data,
+      message: 'کد تایید با موفقیت پیامک شد.'
+    };
   } catch (err) {
-    console.warn('IranPayamak network error:', err);
+    const causeMsg = err?.cause ? String(err.cause?.message || err.cause?.code || err.cause) : '';
+    const errCode = err?.code || err?.cause?.code || '';
+    const netMsg = [
+      err?.message || 'خطای شبکه در ارتباط با وب‌سرویس ایران پیامک',
+      errCode ? `[Code: ${errCode}]` : '',
+      causeMsg && causeMsg !== err?.message ? `[Cause: ${causeMsg}]` : ''
+    ]
+      .filter(Boolean)
+      .join(' ');
+
+    const errorDetails = {
+      httpStatus: 0,
+      statusText: 'NETWORK_ERROR',
+      endpoint,
+      method: 'POST',
+      sendMode,
+      providerMessage: netMsg,
+      networkError: {
+        name: err?.name || 'Error',
+        message: err?.message || '',
+        code: errCode,
+        cause: causeMsg
+      },
+      requestSummary,
+      timestamp: new Date().toISOString()
+    };
+
+    console.warn('IranPayamak network error:', netMsg, errorDetails);
     if (!fallbackEnabled) {
-      return { success: false, simulated: false, error: err.message || 'خطای شبکه در ارتباط با وب‌سرویس پیامک' };
+      return {
+        success: false,
+        simulated: false,
+        gatewayFailed: true,
+        error: `خطای شبکه در اتصال به درگاه پیامک: ${netMsg}`,
+        message: `خطای شبکه در اتصال به درگاه پیامک: ${netMsg}`,
+        errorDetails
+      };
     }
-    return { success: true, simulated: true, code, error: err.message, message: `خطای شبکه در ارسال پیامک؛ کد موقت: ${code}` };
+    return {
+      success: true,
+      simulated: true,
+      gatewayFailed: true,
+      code,
+      error: `خطای شبکه در اتصال به درگاه پیامک: ${netMsg}`,
+      gatewayError: `خطای شبکه در اتصال به درگاه پیامک: ${netMsg}`,
+      errorDetails,
+      message: `خطای شبکه در ارسال پیامک (${netMsg})؛ کد موقت: ${code}`
+    };
   }
 }
 
@@ -896,30 +1149,62 @@ app.post(['/api/sms/send-otp', '/api/v1/sms/send-otp'], wrap(async (req, res) =>
 
   const sysCfg = await dbAdapter.getDoc('system_config', 'main') || {};
   if (sysCfg.smsOtpEnabled === false) {
-    return res.status(400).json({ success: false, message: 'ورود و تایید شماره موبایل در حال حاضر توسط مدیریت غیرفعال شده است.' });
+    return res.status(400).json({
+      success: false,
+      message: 'ورود و تایید شماره موبایل در حال حاضر توسط مدیریت غیرفعال شده است.',
+      errorDetails: {
+        httpStatus: 400,
+        statusText: 'OTP_DISABLED',
+        providerMessage: 'smsOtpEnabled is false in system_config'
+      }
+    });
   }
 
   const phone = normalizeIranPhone(rawPhone);
   if (!phone) {
-    return res.status(400).json({ success: false, message: 'شماره همراه نامعتبر است. شماره باید با 09 آغاز شده و ۱۱ رقم باشد.' });
+    return res.status(400).json({
+      success: false,
+      message: `شماره همراه وارد شده (${rawPhone || 'خالی'}) نامعتبر است. شماره باید با 09 آغاز شده و ۱۱ رقم باشد.`,
+      errorDetails: {
+        httpStatus: 400,
+        statusText: 'INVALID_PHONE',
+        providerMessage: `Invalid Iranian mobile format: ${rawPhone || ''}`
+      }
+    });
   }
 
   // بررسی تکراری نبودن در حالت verify
   if (purpose === 'verify') {
     const existing = await findUserByPhone(phone);
     if (existing && existing.id !== excludeUserId) {
-      return res.status(409).json({ success: false, message: 'این شماره همراه قبلاً برای کاربر دیگری در سیستم ثبت و تایید شده است.' });
+      return res.status(409).json({
+        success: false,
+        message: 'این شماره همراه قبلاً برای کاربر دیگری در سیستم ثبت و تایید شده است.',
+        errorDetails: {
+          httpStatus: 409,
+          statusText: 'PHONE_ALREADY_TAKEN',
+          providerMessage: `Phone ${phone} is already registered to another user.`
+        }
+      });
     }
   }
 
-  // محدودیت ارسال مجدد (در حالت درگاه واقعی ۶۰ ثانیه، در حالت شبیه‌ساز ۵ ثانیه)
+  // محدودیت ارسال مجدد (۱۵ ثانیه در حالت درگاه واقعی، ۲ ثانیه در حالت شبیه‌ساز)
   const existingOtp = otpStore.get(phone);
   const now = Date.now();
-  const hasRealGateway = Boolean(sysCfg.smsApiKey || process.env.IRANPAYAMAK_API_KEY);
-  const cooldownMs = hasRealGateway ? 60 * 1000 : 5 * 1000;
+  const hasRealGateway = Boolean(cleanServerApiKey(sysCfg.smsApiKey || process.env.IRANPAYAMAK_API_KEY));
+  const cooldownMs = hasRealGateway ? 15 * 1000 : 2 * 1000;
   if (existingOtp && (now - existingOtp.sentAt < cooldownMs)) {
     const remainSec = Math.ceil((cooldownMs - (now - existingOtp.sentAt)) / 1000);
-    return res.status(429).json({ success: false, message: `لطفاً ${remainSec} ثانیه صبر کرده و سپس مجدداً تلاش نمایید.` });
+    return res.status(429).json({
+      success: false,
+      message: `لطفاً ${remainSec} ثانیه صبر کرده و سپس مجدداً تلاش نمایید.`,
+      errorDetails: {
+        httpStatus: 429,
+        statusText: 'RATE_LIMITED',
+        providerMessage: `Please wait ${remainSec}s before requesting another code.`
+      }
+    });
   }
 
   const codeLength = sysCfg.otpCodeLength === 5 ? 5 : 6;
@@ -930,7 +1215,12 @@ app.post(['/api/sms/send-otp', '/api/v1/sms/send-otp'], wrap(async (req, res) =>
 
   const smsResult = await sendIranPayamakSms({ phone, code, config: sysCfg });
   if (!smsResult.success) {
-    return res.status(500).json({ success: false, message: smsResult.error || 'خطا در ارسال پیامک از طریق درگاه.' });
+    return res.status(502).json({
+      success: false,
+      message: smsResult.error || 'خطا در ارسال پیامک از طریق درگاه.',
+      error: smsResult.error,
+      errorDetails: smsResult.errorDetails
+    });
   }
 
   otpStore.set(phone, {
@@ -946,6 +1236,9 @@ app.post(['/api/sms/send-otp', '/api/v1/sms/send-otp'], wrap(async (req, res) =>
     message: smsResult.message || 'کد تایید ارسال شد.',
     simulated: smsResult.simulated,
     simulatedOtp: smsResult.simulated ? code : undefined,
+    gatewayFailed: Boolean(smsResult.gatewayFailed),
+    gatewayError: smsResult.gatewayError || smsResult.error || undefined,
+    errorDetails: smsResult.errorDetails || undefined,
     codeLength,
     expiresInSeconds: Math.round(ttlMs / 1000)
   });
@@ -960,27 +1253,64 @@ app.post(['/api/sms/verify-otp', '/api/v1/sms/verify-otp'], wrap(async (req, res
 
   const phone = normalizeIranPhone(rawPhone);
   if (!phone) return res.status(400).json({ success: false, message: 'شماره همراه نامعتبر است.' });
-  if (!code || code.length < 5) return res.status(400).json({ success: false, message: 'کد تایید وارد نشده یا ناقص است.' });
 
   const record = otpStore.get(phone);
   const now = Date.now();
 
   if (!record) {
-    return res.status(400).json({ success: false, message: 'کد تایید یافت نشد یا منقضی شده است. لطفاً مجدداً درخواست ارسال کد دهید.' });
+    return res.status(400).json({
+      success: false,
+      message: 'کد تایید برای این شماره یافت نشد یا منقضی شده است. لطفاً مجدداً درخواست ارسال کد دهید.',
+      errorDetails: {
+        httpStatus: 400,
+        statusText: 'OTP_NOT_FOUND',
+        providerMessage: `No active verification code record found for ${phone}.`
+      }
+    });
   }
 
   if (now > record.expiresAt) {
     otpStore.delete(phone);
-    return res.status(400).json({ success: false, message: 'کد تایید منقضی شده است. لطفاً کد جدید دریافت کنید.' });
+    return res.status(400).json({
+      success: false,
+      message: 'مدت اعتبار کد تایید به پایان رسیده است. لطفاً کد جدید دریافت کنید.',
+      errorDetails: {
+        httpStatus: 400,
+        statusText: 'OTP_EXPIRED',
+        providerMessage: `Verification code for ${phone} expired at ${new Date(record.expiresAt).toISOString()}.`
+      }
+    });
   }
 
-  if (record.code !== code) {
-    record.attempts = (record.attempts || 0) + 1;
-    if (record.attempts >= 5) {
-      otpStore.delete(phone);
-      return res.status(400).json({ success: false, message: 'تعداد دفعات اشتباه بیش از حد مجاز بود. کد منقضی شد.' });
+  // اگر کد در مرحله قبل تایید نشده بود، صحت کد را بررسی کن
+  if (!record.verified) {
+    if (!code || code.length < 5) {
+      return res.status(400).json({ success: false, message: 'کد تایید وارد نشده یا ناقص است.' });
     }
-    return res.status(400).json({ success: false, message: 'کد تایید وارد شده نادرست است.' });
+    if (record.code !== code) {
+      record.attempts = (record.attempts || 0) + 1;
+      if (record.attempts >= 5) {
+        otpStore.delete(phone);
+        return res.status(400).json({
+          success: false,
+          message: 'تعداد دفعات اشتباه بیش از حد مجاز (۵ بار) بود. کد منقضی شد، لطفاً کد جدید دریافت کنید.',
+          errorDetails: {
+            httpStatus: 400,
+            statusText: 'OTP_MAX_ATTEMPTS',
+            providerMessage: 'Maximum verification attempts (5) exceeded.'
+          }
+        });
+      }
+      return res.status(400).json({
+        success: false,
+        message: `کد تایید وارد شده (${code}) نادرست است. (${5 - record.attempts} تلاش باقی‌مانده)`,
+        errorDetails: {
+          httpStatus: 400,
+          statusText: 'OTP_MISMATCH',
+          providerMessage: `Entered code (${code}) did not match generated code. Remaining attempts: ${5 - record.attempts}`
+        }
+      });
+    }
   }
 
   if (purpose === 'verify') {
@@ -1024,7 +1354,7 @@ app.post(['/api/sms/verify-otp', '/api/v1/sms/verify-otp'], wrap(async (req, res
     }
 
     if (!validUsername(desiredUsername)) {
-      return res.status(400).json({ success: false, message: 'نام کاربری نامعتبر است (حداقل ۳ کاراکتر بدون فاصله).' });
+      return res.status(400).json({ success: false, message: 'نام کاربری نامعتبر است (حداقل ۳ کاراکتر انگلیسی/عدد بدون فاصله).' });
     }
 
     if (await dbAdapter.getDoc('users', desiredUsername)) {
@@ -1081,7 +1411,17 @@ app.post(['/api/admin/sms/test', '/api/v1/admin/sms/test'], auth, wrap(async (re
   if (!isAdmin(req.user)) return res.status(403).json({ success: false, message: 'فقط مدیر سیستم مجاز به تست سامانه پیامک است.' });
   const rawPhone = req.body?.phone;
   const phone = normalizeIranPhone(rawPhone);
-  if (!phone) return res.status(400).json({ success: false, message: 'شماره همراه برای تست نامعتبر است (مثال: 09123456789).' });
+  if (!phone) {
+    return res.status(400).json({
+      success: false,
+      message: `شماره همراه وارد شده (${rawPhone || 'خالی'}) برای تست نامعتبر است (مثال: 09123456789).`,
+      errorDetails: {
+        httpStatus: 400,
+        statusText: 'INVALID_TEST_PHONE',
+        providerMessage: `Invalid test phone format: ${rawPhone || ''}`
+      }
+    });
+  }
 
   const storedCfg = await dbAdapter.getDoc('system_config', 'main') || {};
   const testConfig = {
@@ -1396,6 +1736,10 @@ app.post('/api/db/:collection/batch', auth, wrap(async (req, res) => {
         if (!admin) continue;
         if (plain && plain.length >= 6) data.passwordHash = hashPassword(plain);
       }
+    }
+    if (c === 'system_config') {
+      const existingCfg = await dbAdapter.getDoc('system_config', id) || {};
+      data = { ...existingCfg, ...incoming };
     }
     await dbAdapter.putDoc(c, id, data, now);
     if (c === 'chats') notifyChatChanged(data, previousChat);
